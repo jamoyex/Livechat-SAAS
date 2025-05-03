@@ -4,7 +4,8 @@ CREATE TABLE IF NOT EXISTS users (
     email VARCHAR(255) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
     name VARCHAR(255),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_email (email)
 );
 
 -- Businesses table
@@ -20,7 +21,8 @@ CREATE TABLE IF NOT EXISTS businesses (
     widget_button_color VARCHAR(32),
     widget_visitor_message_color VARCHAR(32),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (owner_user_id) REFERENCES users(id)
+    FOREIGN KEY (owner_user_id) REFERENCES users(id),
+    INDEX idx_owner (owner_user_id)
 );
 
 -- Business users (team members per business)
@@ -32,7 +34,8 @@ CREATE TABLE IF NOT EXISTS business_users (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (business_id) REFERENCES businesses(id),
     FOREIGN KEY (user_id) REFERENCES users(id),
-    UNIQUE KEY unique_user_per_business (business_id, user_id)
+    UNIQUE KEY unique_user_per_business (business_id, user_id),
+    INDEX idx_business_user (business_id, user_id)
 );
 
 -- Conversations table (per business)
@@ -46,7 +49,10 @@ CREATE TABLE IF NOT EXISTS conversations (
     last_message_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (business_id) REFERENCES businesses(id),
-    FOREIGN KEY (assigned_to) REFERENCES business_users(id)
+    FOREIGN KEY (assigned_to) REFERENCES business_users(id),
+    INDEX idx_business_status (business_id, status),
+    INDEX idx_visitor (visitor_name),
+    INDEX idx_last_message (last_message_at)
 );
 
 -- Messages table
@@ -59,6 +65,7 @@ CREATE TABLE IF NOT EXISTS messages (
     is_read TINYINT(1) DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (conversation_id) REFERENCES conversations(id),
-    FOREIGN KEY (sender_id) REFERENCES business_users(id)
-); 
+    FOREIGN KEY (sender_id) REFERENCES business_users(id),
+    INDEX idx_conversation_created (conversation_id, created_at),
+    INDEX idx_is_read (is_read)
 ); 

@@ -10,6 +10,8 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cookieParser = require('cookie-parser');
 const { v4: uuidv4 } = require('uuid');
+const zlib = require('zlib');
+const rateLimit = require('express-rate-limit');
 const app = express();
 
 // Set up view engine
@@ -37,11 +39,130 @@ const dbConfig = {
     user: process.env.DB_USER,
     password: process.env.DB_PASS,
     database: process.env.DB_NAME,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0
 };
+
+// Create connection pool
+const pool = mysql.createPool(dbConfig);
 
 // Create HTTP server and Socket.IO instance
 const server = http.createServer(app);
 const io = new Server(server);
+
+// Cache for business settings
+const businessCache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+// Message batch size for loading
+const MESSAGE_BATCH_SIZE = 50;
+
+// Rate limiters
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 5, // 5 attempts per window
+    message: { error: 'Too many login attempts, please try again later.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+const apiLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 minute
+    max: 100, // 100 requests per minute
+    message: { error: 'Too many requests, please try again later.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+const widgetLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 minute
+    max: 200, // 200 requests per minute
+    message: { error: 'Too many widget requests, please try again later.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+// Helper function to compress messages
+function compressMessages(messages) {
+    return new Promise((resolve, reject) => {
+        zlib.deflate(JSON.stringify(messages), (err, buffer) => {
+            if (err) reject(err);
+            else resolve(buffer.toString('base64'));
+        });
+    });
+}
+
+// Helper function to decompress messages
+function decompressMessages(compressed) {
+    return new Promise((resolve, reject) => {
+        const buffer = Buffer.from(compressed, 'base64');
+        zlib.inflate(buffer, (err, decompressed) => {
+            if (err) reject(err);
+            else resolve(JSON.parse(decompressed.toString()));
+        });
+    });
+}
+
+// Helper function to get business settings with caching
+async function getBusinessSettings(businessId) {
+    if (businessCache.has(businessId)) {
+        const cached = businessCache.get(businessId);
+        if (Date.now() - cached.timestamp < CACHE_TTL) {
+            return cached.data;
+        }
+    }
+
+    try {
+        const [rows] = await pool.execute(
+            'SELECT * FROM businesses WHERE id = ?',
+            [businessId]
+        );
+        if (rows.length > 0) {
+            const settings = rows[0];
+            businessCache.set(businessId, {
+                data: settings,
+                timestamp: Date.now()
+            });
+            return settings;
+        }
+    } catch (err) {
+        console.error('Error fetching business settings:', err);
+    }
+    return null;
+}
+
+// Clear cache periodically
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, value] of businessCache.entries()) {
+        if (now - value.timestamp > CACHE_TTL) {
+            businessCache.delete(key);
+        }
+    }
+}, CACHE_TTL);
+
+// Optimized message loading with compression
+async function getPaginatedMessages(conversationId, page = 1, limit = MESSAGE_BATCH_SIZE) {
+    const offset = (page - 1) * limit;
+    try {
+        const [messages] = await pool.execute(
+            `SELECT id, conversation_id, content, sender_type, is_read, created_at 
+             FROM messages 
+             WHERE conversation_id = ? 
+             ORDER BY created_at DESC 
+             LIMIT ? OFFSET ?`,
+            [conversationId, limit, offset]
+        );
+        
+        // Compress messages before sending
+        const compressed = await compressMessages(messages);
+        return { messages: compressed, hasMore: messages.length === limit };
+    } catch (err) {
+        console.error('Error loading messages:', err);
+        throw err;
+    }
+}
 
 // Socket.IO connection for widget and admin/agent
 io.on('connection', (socket) => {
@@ -49,8 +170,7 @@ io.on('connection', (socket) => {
     socket.on('visitor join', async ({ businessId, visitorId }) => {
         let conversationId;
         try {
-            const connection = await mysql.createConnection(dbConfig);
-            const [convRows] = await connection.execute(
+            const [convRows] = await pool.execute(
                 'SELECT * FROM conversations WHERE business_id = ? AND visitor_name = ?',
                 [businessId, visitorId]
             );
@@ -61,9 +181,42 @@ io.on('connection', (socket) => {
                 socket.data.visitorId = visitorId;
                 socket.join('conv_' + conversationId);
             }
-            await connection.end();
-        } catch (err) {}
+        } catch (err) {
+            console.error('Error in visitor join:', err);
+        }
     });
+
+    // Handle closing conversation
+    socket.on('close conversation', async ({ businessId, visitorId }) => {
+        try {
+            // Find and close the current conversation
+            const [convRows] = await pool.execute(
+                'SELECT * FROM conversations WHERE business_id = ? AND visitor_name = ? AND status = "active"',
+                [businessId, visitorId]
+            );
+            
+            if (convRows.length > 0) {
+                const conversationId = convRows[0].id;
+                // Update conversation status to closed
+                await pool.execute(
+                    'UPDATE conversations SET status = "closed" WHERE id = ?',
+                    [conversationId]
+                );
+                
+                // Leave the conversation room
+                socket.leave('conv_' + conversationId);
+                
+                // Notify business room about closed conversation
+                io.to('business_' + businessId).emit('conversation closed', { 
+                    businessId, 
+                    conversationId 
+                });
+            }
+        } catch (err) {
+            console.error('Error closing conversation:', err);
+        }
+    });
+
     // Admin/agent joins a conversation
     socket.on('admin join', ({ businessId, conversationId }) => {
         socket.data.conversationId = conversationId;
@@ -74,6 +227,26 @@ io.on('connection', (socket) => {
     socket.on('join business', ({ businessId }) => {
         socket.join('business_' + businessId);
     });
+    // Load messages with pagination and compression
+    socket.on('load messages', async ({ conversationId, page = 1 }) => {
+        try {
+            const { messages: compressed, hasMore } = await getPaginatedMessages(conversationId, page);
+            socket.emit('messages loaded', { messages: compressed, page, hasMore });
+        } catch (err) {
+            console.error('Error loading messages:', err);
+            socket.emit('error', { message: 'Failed to load messages' });
+        }
+    });
+    // Handle compressed messages
+    socket.on('chat message', async (data) => {
+        try {
+            const decompressed = await decompressMessages(data.messages);
+            // Process decompressed messages
+            // ... rest of the message handling code ...
+        } catch (err) {
+            console.error('Error processing compressed messages:', err);
+        }
+    });
     // Visitor sends a message
     socket.on('visitor message', async (data) => {
         const { content } = data;
@@ -83,17 +256,16 @@ io.on('connection', (socket) => {
         let isNewConversation = false;
         if (!businessId || !visitorId) return;
         try {
-            const connection = await mysql.createConnection(dbConfig);
             // If no conversation, create it now
             if (!conversationId) {
-                const [convRows] = await connection.execute(
+                const [convRows] = await pool.execute(
                     'SELECT * FROM conversations WHERE business_id = ? AND visitor_name = ?',
                     [businessId, visitorId]
                 );
                 if (convRows.length > 0) {
                     conversationId = convRows[0].id;
                 } else {
-                    const [result] = await connection.execute(
+                    const [result] = await pool.execute(
                         'INSERT INTO conversations (business_id, visitor_name, status) VALUES (?, ?, ?)',
                         [businessId, visitorId, 'active']
                     );
@@ -105,12 +277,13 @@ io.on('connection', (socket) => {
                 socket.data.visitorId = visitorId;
                 socket.join('conv_' + conversationId);
             }
-            await connection.execute(
+            await pool.execute(
                 'INSERT INTO messages (conversation_id, content, sender_type, is_read, created_at) VALUES (?, ?, ?, ?, NOW())',
                 [conversationId, content, 'user', 0]
             );
-            await connection.end();
-        } catch (err) {}
+        } catch (err) {
+            console.error('Error in visitor message:', err);
+        }
         // Broadcast to all in the conversation (including admins/agents)
         io.to('conv_' + conversationId).emit('chat message', { sender_type: 'user', conversationId, content });
         // Emit to business room for new or updated conversation
@@ -125,13 +298,13 @@ io.on('connection', (socket) => {
         const { businessId, conversationId, content } = data;
         if (!conversationId) return;
         try {
-            const connection = await mysql.createConnection(dbConfig);
-            await connection.execute(
+            await pool.execute(
                 'INSERT INTO messages (conversation_id, content, sender_type, is_read, created_at) VALUES (?, ?, ?, ?, NOW())',
                 [conversationId, content, 'agent', 0]
             );
-            await connection.end();
-        } catch (err) {}
+        } catch (err) {
+            console.error('Error in admin message:', err);
+        }
         // Broadcast to all in the conversation (including visitor)
         io.to('conv_' + conversationId).emit('chat message', { sender_type: 'agent', conversationId, content });
         // Emit to business room for updated conversation
@@ -153,7 +326,7 @@ app.get('/register', (req, res) => {
 });
 
 // Registration (users table)
-app.post('/register', async (req, res) => {
+app.post('/register', authLimiter, async (req, res) => {
     const { email, password, name } = req.body;
     let error;
     if (!email || !password || !name) {
@@ -161,24 +334,21 @@ app.post('/register', async (req, res) => {
         return res.render('register', { error });
     }
     try {
-        const connection = await mysql.createConnection(dbConfig);
         // Check if email already exists
-        const [rows] = await connection.execute('SELECT id FROM users WHERE email = ?', [email]);
+        const [rows] = await pool.execute('SELECT id FROM users WHERE email = ?', [email]);
         if (rows.length > 0) {
             error = 'Email already exists.';
-            await connection.end();
             return res.render('register', { error });
         }
         // Hash password
         const hashedPassword = await bcrypt.hash(password, 10);
         // Insert new user
-        const [result] = await connection.execute(
+        const [result] = await pool.execute(
             'INSERT INTO users (email, password, name) VALUES (?, ?, ?)',
             [email, hashedPassword, name]
         );
         // Get the new user ID
         const userId = result.insertId;
-        await connection.end();
         // Auto-login: set session
         req.session.userId = userId;
         req.session.userName = name;
@@ -191,7 +361,7 @@ app.post('/register', async (req, res) => {
 });
 
 // Login (users table)
-app.post('/login', async (req, res) => {
+app.post('/login', authLimiter, async (req, res) => {
     const { email, password } = req.body;
     let error;
     if (!email || !password) {
@@ -199,9 +369,7 @@ app.post('/login', async (req, res) => {
         return res.render('login', { error });
     }
     try {
-        const connection = await mysql.createConnection(dbConfig);
-        const [rows] = await connection.execute('SELECT * FROM users WHERE email = ?', [email]);
-        await connection.end();
+        const [rows] = await pool.execute('SELECT * FROM users WHERE email = ?', [email]);
         if (rows.length === 0) {
             error = 'Invalid email or password.';
             return res.render('login', { error });
@@ -235,11 +403,10 @@ app.get('/dashboard', requireLogin, async (req, res) => {
     const userId = req.session.userId;
     let businesses = [];
     try {
-        const connection = await mysql.createConnection(dbConfig);
-        const [owned] = await connection.execute(
+        const [owned] = await pool.execute(
             'SELECT * FROM businesses WHERE owner_user_id = ?', [userId]
         );
-        const [member] = await connection.execute(
+        const [member] = await pool.execute(
             `SELECT b.* FROM businesses b
              JOIN business_users bu ON bu.business_id = b.id
              WHERE bu.user_id = ?`, [userId]
@@ -250,7 +417,6 @@ app.get('/dashboard', requireLogin, async (req, res) => {
                 businesses.push(mb);
             }
         });
-        await connection.end();
     } catch (err) {
         businesses = [];
     }
@@ -277,11 +443,10 @@ app.get('/dashboard/:businessId', requireLogin, async (req, res) => {
     let businesses = [];
     let selectedBusiness = null;
     try {
-        const connection = await mysql.createConnection(dbConfig);
-        const [owned] = await connection.execute(
+        const [owned] = await pool.execute(
             'SELECT * FROM businesses WHERE owner_user_id = ?', [userId]
         );
-        const [member] = await connection.execute(
+        const [member] = await pool.execute(
             `SELECT b.* FROM businesses b
              JOIN business_users bu ON bu.business_id = b.id
              WHERE bu.user_id = ?`, [userId]
@@ -294,7 +459,6 @@ app.get('/dashboard/:businessId', requireLogin, async (req, res) => {
         });
         // Find business by ID
         selectedBusiness = businesses.find(b => b.id === businessId);
-        await connection.end();
     } catch (err) {
         businesses = [];
         selectedBusiness = null;
@@ -314,21 +478,29 @@ app.post('/business/add', requireLogin, async (req, res) => {
         return res.redirect('/dashboard');
     }
     try {
-        const connection = await mysql.createConnection(dbConfig);
-        // Insert business with widget settings
-        const [result] = await connection.execute(
-            'INSERT INTO businesses (name, owner_user_id, widget_header_color, widget_h1_color, widget_button_color, widget_visitor_message_color, widget_quick_replies) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [name, userId, widget_header_color, widget_h1_color, widget_button_color, widget_visitor_message_color, widget_quick_replies]
-        );
-        const businessId = result.insertId;
-        // Add user as admin in business_users
-        await connection.execute(
-            'INSERT INTO business_users (business_id, user_id, role) VALUES (?, ?, ?)',
-            [businessId, userId, 'admin']
-        );
-        await connection.end();
-        // Redirect to the new dashboard URL
-        return res.redirect(`/dashboard/${businessId}`);
+        const connection = await pool.getConnection();
+        try {
+            await connection.beginTransaction();
+            // Insert business with widget settings
+            const [result] = await connection.execute(
+                'INSERT INTO businesses (name, owner_user_id, widget_header_color, widget_h1_color, widget_button_color, widget_visitor_message_color, widget_quick_replies) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [name, userId, widget_header_color, widget_h1_color, widget_button_color, widget_visitor_message_color, widget_quick_replies]
+            );
+            const businessId = result.insertId;
+            // Add user as admin in business_users
+            await connection.execute(
+                'INSERT INTO business_users (business_id, user_id, role) VALUES (?, ?, ?)',
+                [businessId, userId, 'admin']
+            );
+            await connection.commit();
+            // Redirect to the new dashboard URL
+            return res.redirect(`/dashboard/${businessId}`);
+        } catch (err) {
+            await connection.rollback();
+            throw err;
+        } finally {
+            connection.release();
+        }
     } catch (err) {
         return res.redirect('/dashboard');
     }
@@ -342,9 +514,12 @@ app.get('/logout', (req, res) => {
 });
 
 // Widget embed route (with chat history)
-app.get('/widget/:businessId', async (req, res) => {
+app.get('/widget/:businessId', widgetLimiter, async (req, res) => {
     const businessId = req.params.businessId;
-    let business = null;
+    let business = await getBusinessSettings(businessId);
+    if (!business) {
+        return res.status(404).send('Business not found');
+    }
     let messages = [];
     // Widget settings preview support
     const preview = req.query.preview === '1';
@@ -352,10 +527,8 @@ app.get('/widget/:businessId', async (req, res) => {
     let widgetHeaderName, widgetHeaderColor, widgetQuickReplies;
     let widgetH1Color, widgetButtonColor, widgetVisitorMessageColor;
     try {
-        const connection = await mysql.createConnection(dbConfig);
-        const [bizRows] = await connection.execute('SELECT * FROM businesses WHERE id = ?', [businessId]);
+        const [bizRows] = await pool.execute('SELECT * FROM businesses WHERE id = ?', [businessId]);
         if (bizRows.length === 0) {
-            await connection.end();
             return res.status(404).send('Business not found');
         }
         business = bizRows[0];
@@ -370,7 +543,7 @@ app.get('/widget/:businessId', async (req, res) => {
                 res.cookie('visitorId', visitorId, { maxAge: 1000 * 60 * 60 * 24 * 30 }); // 30 days
             }
             // Find conversation for this visitor
-            const [convRows] = await connection.execute(
+            const [convRows] = await pool.execute(
                 'SELECT * FROM conversations WHERE business_id = ? AND visitor_name = ?',
                 [businessId, visitorId]
             );
@@ -378,14 +551,13 @@ app.get('/widget/:businessId', async (req, res) => {
             if (convRows.length > 0) {
                 conversationId = convRows[0].id;
                 // Load messages
-                const [msgRows] = await connection.execute(
+                const [msgRows] = await pool.execute(
                     'SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC',
                     [conversationId]
                 );
                 messages = msgRows;
             }
         }
-        await connection.end();
         // Widget settings: use preview query params if present, else DB, else fallback
         widgetHeaderName = req.query.headerName || business.widget_header_name || business.name + ' Live Chat';
         widgetHeaderColor = req.query.headerColor || business.widget_header_color || '#eee';
@@ -421,7 +593,7 @@ app.get('/business/:businessId/chats/:conversationId', requireLogin, async (req,
     let conversation = null;
     let messages = [];
     try {
-        const connection = await mysql.createConnection(dbConfig);
+        const connection = await pool.getConnection();
         // Get business
         const [bizRows] = await connection.execute('SELECT * FROM businesses WHERE id = ?', [businessId]);
         if (bizRows.length === 0) {
@@ -463,6 +635,16 @@ app.get('/business/:businessId/chats/:conversationId', requireLogin, async (req,
     res.render('conversation', { business, conversation, messages });
 });
 
+// Helper function to check if a user has access to a business
+async function checkBusinessAccess(businessId, userId) {
+    const [bizRows] = await pool.execute('SELECT * FROM businesses WHERE id = ?', [businessId]);
+    if (bizRows.length === 0) return { error: 'Business not found' };
+    const business = bizRows[0];
+    const [memberRows] = await pool.execute('SELECT * FROM business_users WHERE business_id = ? AND user_id = ?', [businessId, userId]);
+    if (business.owner_user_id !== userId && memberRows.length === 0) return { error: 'Forbidden' };
+    return { business };
+}
+
 // API: Get conversations (paginated, searchable)
 app.get('/api/business/:id/conversations', requireLogin, async (req, res) => {
     const userId = req.session.userId;
@@ -472,13 +654,8 @@ app.get('/api/business/:id/conversations', requireLogin, async (req, res) => {
     const offset = (page - 1) * limit;
     const search = req.query.search ? `%${req.query.search}%` : null;
     try {
-        const connection = await mysql.createConnection(dbConfig);
-        // Check access
-        const [bizRows] = await connection.execute('SELECT * FROM businesses WHERE id = ?', [businessId]);
-        if (bizRows.length === 0) return res.status(404).json({ error: 'Business not found' });
-        const business = bizRows[0];
-        const [memberRows] = await connection.execute('SELECT * FROM business_users WHERE business_id = ? AND user_id = ?', [businessId, userId]);
-        if (business.owner_user_id !== userId && memberRows.length === 0) return res.status(403).json({ error: 'Forbidden' });
+        const { error, business } = await checkBusinessAccess(businessId, userId);
+        if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
         // Query conversations
         let query = `SELECT c.*, 
             (SELECT content FROM messages WHERE conversation_id = c.id AND sender_type = 'user' ORDER BY created_at DESC LIMIT 1) as last_user_message,
@@ -488,20 +665,13 @@ app.get('/api/business/:id/conversations', requireLogin, async (req, res) => {
             FROM conversations c WHERE c.business_id = ?`;
         let params = [businessId];
         if (search) {
-            query += ' AND (' +
-                'c.visitor_name LIKE ? OR c.id LIKE ? OR EXISTS (' +
-                'SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.content LIKE ?)' +
-            ')';
-            params.push(search, search, search);
+            query += ' AND (c.visitor_name LIKE ? OR c.visitor_email LIKE ?)';
+            params.push(search, search);
         }
-        query += ' ORDER BY CASE WHEN c.status = "handled" THEN 0 WHEN c.status = "active" THEN 1 ELSE 2 END, last_message_time DESC LIMIT ? OFFSET ?';
+        query += ' ORDER BY c.last_message_at DESC LIMIT ? OFFSET ?';
         params.push(limit, offset);
-        const [rows] = await connection.execute(query, params);
-        // Total count
-        const [countRows] = await connection.execute('SELECT COUNT(*) as count FROM conversations WHERE business_id = ?', [businessId]);
-        const total = countRows[0].count;
-        await connection.end();
-        res.json({ conversations: rows, hasMore: offset + limit < total });
+        const [conversations] = await pool.execute(query, params);
+        res.json({ conversations });
     } catch (err) {
         res.status(500).json({ error: 'Server error' });
     }
@@ -513,17 +683,11 @@ app.get('/api/business/:id/conversations/:conversationId', requireLogin, async (
     const businessId = req.params.id;
     const conversationId = req.params.conversationId;
     try {
-        const connection = await mysql.createConnection(dbConfig);
-        // Check access
-        const [bizRows] = await connection.execute('SELECT * FROM businesses WHERE id = ?', [businessId]);
-        if (bizRows.length === 0) return res.status(404).json({ error: 'Business not found' });
-        const business = bizRows[0];
-        const [memberRows] = await connection.execute('SELECT * FROM business_users WHERE business_id = ? AND user_id = ?', [businessId, userId]);
-        if (business.owner_user_id !== userId && memberRows.length === 0) return res.status(403).json({ error: 'Forbidden' });
+        const { error, business } = await checkBusinessAccess(businessId, userId);
+        if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
         // Get conversation
-        const [convRows] = await connection.execute('SELECT * FROM conversations WHERE id = ? AND business_id = ?', [conversationId, businessId]);
+        const [convRows] = await pool.execute('SELECT * FROM conversations WHERE id = ? AND business_id = ?', [conversationId, businessId]);
         if (convRows.length === 0) return res.status(404).json({ error: 'Conversation not found' });
-        await connection.end();
         res.json({ conversation: convRows[0] });
     } catch (err) {
         res.status(500).json({ error: 'Server error' });
@@ -536,16 +700,10 @@ app.get('/api/business/:id/conversations/:conversationId/messages', requireLogin
     const businessId = req.params.id;
     const conversationId = req.params.conversationId;
     try {
-        const connection = await mysql.createConnection(dbConfig);
-        // Check access
-        const [bizRows] = await connection.execute('SELECT * FROM businesses WHERE id = ?', [businessId]);
-        if (bizRows.length === 0) return res.status(404).json({ error: 'Business not found' });
-        const business = bizRows[0];
-        const [memberRows] = await connection.execute('SELECT * FROM business_users WHERE business_id = ? AND user_id = ?', [businessId, userId]);
-        if (business.owner_user_id !== userId && memberRows.length === 0) return res.status(403).json({ error: 'Forbidden' });
+        const { error, business } = await checkBusinessAccess(businessId, userId);
+        if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
         // Get messages
-        const [msgRows] = await connection.execute('SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC', [conversationId]);
-        await connection.end();
+        const [msgRows] = await pool.execute('SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC', [conversationId]);
         res.json({ messages: msgRows });
     } catch (err) {
         res.status(500).json({ error: 'Server error' });
@@ -558,16 +716,10 @@ app.post('/api/business/:id/conversations/:conversationId/takeover', requireLogi
     const businessId = req.params.id;
     const conversationId = req.params.conversationId;
     try {
-        const connection = await mysql.createConnection(dbConfig);
-        // Check access
-        const [bizRows] = await connection.execute('SELECT * FROM businesses WHERE id = ?', [businessId]);
-        if (bizRows.length === 0) return res.status(404).json({ error: 'Business not found' });
-        const business = bizRows[0];
-        const [memberRows] = await connection.execute('SELECT * FROM business_users WHERE business_id = ? AND user_id = ?', [businessId, userId]);
-        if (business.owner_user_id !== userId && memberRows.length === 0) return res.status(403).json({ error: 'Forbidden' });
+        const { error, business } = await checkBusinessAccess(businessId, userId);
+        if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
         // Update conversation status
-        await connection.execute('UPDATE conversations SET status = ? WHERE id = ? AND business_id = ?', ['handled', conversationId, businessId]);
-        await connection.end();
+        await pool.execute('UPDATE conversations SET status = ? WHERE id = ? AND business_id = ?', ['handled', conversationId, businessId]);
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: 'Server error' });
@@ -580,16 +732,10 @@ app.post('/api/business/:id/conversations/:conversationId/let-bot-handle', requi
     const businessId = req.params.id;
     const conversationId = req.params.conversationId;
     try {
-        const connection = await mysql.createConnection(dbConfig);
-        // Check access
-        const [bizRows] = await connection.execute('SELECT * FROM businesses WHERE id = ?', [businessId]);
-        if (bizRows.length === 0) return res.status(404).json({ error: 'Business not found' });
-        const business = bizRows[0];
-        const [memberRows] = await connection.execute('SELECT * FROM business_users WHERE business_id = ? AND user_id = ?', [businessId, userId]);
-        if (business.owner_user_id !== userId && memberRows.length === 0) return res.status(403).json({ error: 'Forbidden' });
+        const { error, business } = await checkBusinessAccess(businessId, userId);
+        if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
         // Update conversation status
-        await connection.execute('UPDATE conversations SET status = ? WHERE id = ? AND business_id = ?', ['active', conversationId, businessId]);
-        await connection.end();
+        await pool.execute('UPDATE conversations SET status = ? WHERE id = ? AND business_id = ?', ['active', conversationId, businessId]);
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: 'Server error' });
@@ -602,18 +748,22 @@ app.delete('/api/business/:id/conversations/:conversationId', requireLogin, asyn
     const businessId = req.params.id;
     const conversationId = req.params.conversationId;
     try {
-        const connection = await mysql.createConnection(dbConfig);
-        // Check access
-        const [bizRows] = await connection.execute('SELECT * FROM businesses WHERE id = ?', [businessId]);
-        if (bizRows.length === 0) return res.status(404).json({ error: 'Business not found' });
-        const business = bizRows[0];
-        const [memberRows] = await connection.execute('SELECT * FROM business_users WHERE business_id = ? AND user_id = ?', [businessId, userId]);
-        if (business.owner_user_id !== userId && memberRows.length === 0) return res.status(403).json({ error: 'Forbidden' });
-        // Delete messages and conversation
-        await connection.execute('DELETE FROM messages WHERE conversation_id = ?', [conversationId]);
-        await connection.execute('DELETE FROM conversations WHERE id = ? AND business_id = ?', [conversationId, businessId]);
-        await connection.end();
-        res.json({ success: true });
+        const connection = await pool.getConnection();
+        try {
+            await connection.beginTransaction();
+            const { error, business } = await checkBusinessAccess(businessId, userId);
+            if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
+            // Delete messages and conversation
+            await connection.execute('DELETE FROM messages WHERE conversation_id = ?', [conversationId]);
+            await connection.execute('DELETE FROM conversations WHERE id = ? AND business_id = ?', [conversationId, businessId]);
+            await connection.commit();
+            res.json({ success: true });
+        } catch (err) {
+            await connection.rollback();
+            throw err;
+        } finally {
+            connection.release();
+        }
     } catch (err) {
         res.status(500).json({ error: 'Server error' });
     }
@@ -624,22 +774,16 @@ app.get('/api/business/:id/team', requireLogin, async (req, res) => {
     const userId = req.session.userId;
     const businessId = req.params.id;
     try {
-        const connection = await mysql.createConnection(dbConfig);
-        // Check access
-        const [bizRows] = await connection.execute('SELECT * FROM businesses WHERE id = ?', [businessId]);
-        if (bizRows.length === 0) return res.status(404).json({ error: 'Business not found' });
-        const business = bizRows[0];
-        const [memberRows] = await connection.execute('SELECT * FROM business_users WHERE business_id = ? AND user_id = ?', [businessId, userId]);
-        if (business.owner_user_id !== userId && memberRows.length === 0) return res.status(403).json({ error: 'Forbidden' });
+        const { error, business } = await checkBusinessAccess(businessId, userId);
+        if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
         // Get team members
-        const [teamRows] = await connection.execute(
+        const [teamRows] = await pool.execute(
             `SELECT u.id, u.name, u.email, bu.role 
              FROM users u 
              JOIN business_users bu ON u.id = bu.user_id 
              WHERE bu.business_id = ?`,
             [businessId]
         );
-        await connection.end();
         res.json({ team: teamRows });
     } catch (err) {
         res.status(500).json({ error: 'Server error' });
@@ -653,21 +797,25 @@ app.post('/api/business/:id/team', requireLogin, async (req, res) => {
     const { email, role } = req.body;
     if (!email || !role) return res.status(400).json({ error: 'Missing fields' });
     try {
-        const connection = await mysql.createConnection(dbConfig);
-        // Check access
-        const [bizRows] = await connection.execute('SELECT * FROM businesses WHERE id = ?', [businessId]);
-        if (bizRows.length === 0) return res.status(404).json({ error: 'Business not found' });
-        const business = bizRows[0];
-        const [memberRows] = await connection.execute('SELECT * FROM business_users WHERE business_id = ? AND user_id = ?', [businessId, userId]);
-        if (business.owner_user_id !== userId && memberRows.length === 0) return res.status(403).json({ error: 'Forbidden' });
-        // Find user by email
-        const [userRows] = await connection.execute('SELECT * FROM users WHERE email = ?', [email]);
-        if (userRows.length === 0) return res.status(404).json({ error: 'User not found' });
-        const newUser = userRows[0];
-        // Add to business_users
-        await connection.execute('INSERT IGNORE INTO business_users (business_id, user_id, role) VALUES (?, ?, ?)', [businessId, newUser.id, role]);
-        await connection.end();
-        res.json({ success: true });
+        const connection = await pool.getConnection();
+        try {
+            await connection.beginTransaction();
+            const { error, business } = await checkBusinessAccess(businessId, userId);
+            if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
+            // Find user by email
+            const [userRows] = await connection.execute('SELECT * FROM users WHERE email = ?', [email]);
+            if (userRows.length === 0) return res.status(404).json({ error: 'User not found' });
+            const newUser = userRows[0];
+            // Add to business_users
+            await connection.execute('INSERT IGNORE INTO business_users (business_id, user_id, role) VALUES (?, ?, ?)', [businessId, newUser.id, role]);
+            await connection.commit();
+            res.json({ success: true });
+        } catch (err) {
+            await connection.rollback();
+            throw err;
+        } finally {
+            connection.release();
+        }
     } catch (err) {
         res.status(500).json({ error: 'Server error' });
     }
@@ -679,16 +827,10 @@ app.delete('/api/business/:id/team/:userId', requireLogin, async (req, res) => {
     const businessId = req.params.id;
     const removeUserId = req.params.userId;
     try {
-        const connection = await mysql.createConnection(dbConfig);
-        // Check access
-        const [bizRows] = await connection.execute('SELECT * FROM businesses WHERE id = ?', [businessId]);
-        if (bizRows.length === 0) return res.status(404).json({ error: 'Business not found' });
-        const business = bizRows[0];
-        const [memberRows] = await connection.execute('SELECT * FROM business_users WHERE business_id = ? AND user_id = ?', [businessId, userId]);
-        if (business.owner_user_id !== userId && memberRows.length === 0) return res.status(403).json({ error: 'Forbidden' });
+        const { error, business } = await checkBusinessAccess(businessId, userId);
+        if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
         // Remove from business_users
-        await connection.execute('DELETE FROM business_users WHERE business_id = ? AND user_id = ?', [businessId, removeUserId]);
-        await connection.end();
+        await pool.execute('DELETE FROM business_users WHERE business_id = ? AND user_id = ?', [businessId, removeUserId]);
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: 'Server error' });
@@ -700,14 +842,8 @@ app.get('/api/business/:id/widget-settings', requireLogin, async (req, res) => {
     const userId = req.session.userId;
     const businessId = req.params.id;
     try {
-        const connection = await mysql.createConnection(dbConfig);
-        // Check access
-        const [bizRows] = await connection.execute('SELECT * FROM businesses WHERE id = ?', [businessId]);
-        if (bizRows.length === 0) return res.status(404).json({ error: 'Business not found' });
-        const business = bizRows[0];
-        const [memberRows] = await connection.execute('SELECT * FROM business_users WHERE business_id = ? AND user_id = ?', [businessId, userId]);
-        if (business.owner_user_id !== userId && memberRows.length === 0) return res.status(403).json({ error: 'Forbidden' });
-        await connection.end();
+        const { error, business } = await checkBusinessAccess(businessId, userId);
+        if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
         res.json({ settings: business });
     } catch (err) {
         res.status(500).json({ error: 'Server error' });
@@ -720,18 +856,12 @@ app.post('/api/business/:id/widget-settings', requireLogin, async (req, res) => 
     const businessId = req.params.id;
     const { widget_header_name, widget_header_color, widget_quick_replies, widget_h1_color, widget_button_color, widget_visitor_message_color } = req.body;
     try {
-        const connection = await mysql.createConnection(dbConfig);
-        // Check access
-        const [bizRows] = await connection.execute('SELECT * FROM businesses WHERE id = ?', [businessId]);
-        if (bizRows.length === 0) return res.status(404).json({ error: 'Business not found' });
-        const business = bizRows[0];
-        const [memberRows] = await connection.execute('SELECT * FROM business_users WHERE business_id = ? AND user_id = ?', [businessId, userId]);
-        if (business.owner_user_id !== userId && memberRows.length === 0) return res.status(403).json({ error: 'Forbidden' });
-        await connection.execute(
+        const { error, business } = await checkBusinessAccess(businessId, userId);
+        if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
+        await pool.execute(
             'UPDATE businesses SET widget_header_name = ?, widget_header_color = ?, widget_quick_replies = ?, widget_h1_color = ?, widget_button_color = ?, widget_visitor_message_color = ? WHERE id = ?',
             [widget_header_name, widget_header_color, widget_quick_replies, widget_h1_color, widget_button_color, widget_visitor_message_color, businessId]
         );
-        await connection.end();
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: 'Server error' });
@@ -744,21 +874,42 @@ app.post('/api/business/:id/conversations/:conversationId/mark-read', requireLog
     const businessId = req.params.id;
     const conversationId = req.params.conversationId;
     try {
-        const connection = await mysql.createConnection(dbConfig);
-        // Check access
-        const [bizRows] = await connection.execute('SELECT * FROM businesses WHERE id = ?', [businessId]);
-        if (bizRows.length === 0) return res.status(404).json({ error: 'Business not found' });
-        const business = bizRows[0];
-        const [memberRows] = await connection.execute('SELECT * FROM business_users WHERE business_id = ? AND user_id = ?', [businessId, userId]);
-        if (business.owner_user_id !== userId && memberRows.length === 0) return res.status(403).json({ error: 'Forbidden' });
+        const { error, business } = await checkBusinessAccess(businessId, userId);
+        if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
         // Mark all visitor messages as read
-        await connection.execute('UPDATE messages SET is_read = 1 WHERE conversation_id = ? AND sender_type = ? AND is_read = 0', [conversationId, 'user']);
-        await connection.end();
+        await pool.execute('UPDATE messages SET is_read = 1 WHERE conversation_id = ? AND sender_type = ? AND is_read = 0', [conversationId, 'user']);
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: 'Server error' });
     }
 });
+
+// Add decompression endpoint
+app.post('/api/decompress', express.json(), async (req, res) => {
+    try {
+        const { messages } = req.body;
+        const decompressed = await decompressMessages(messages);
+        res.json(decompressed);
+    } catch (err) {
+        console.error('Error decompressing messages:', err);
+        res.status(500).json({ error: 'Failed to decompress messages' });
+    }
+});
+
+// Apply rate limiters to routes
+app.post('/login', authLimiter, async (req, res) => {
+    // ... existing login code ...
+});
+
+app.post('/register', authLimiter, async (req, res) => {
+    // ... existing register code ...
+});
+
+// Apply API limiter to all API routes
+app.use('/api', apiLimiter);
+
+// Apply widget limiter to widget routes
+app.use('/widget', widgetLimiter);
 
 // Start server
 const PORT = process.env.PORT || 3001;
