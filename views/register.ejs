@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register - BotBuilders</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/css/style.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #f6f8fa 0%, #e0e7ff 100%);
+            min-height: 100vh;
+        }
+        .navbar {
+            background: #fff !important;
+            box-shadow: 0 2px 12px rgba(59,130,246,0.06);
+        }
+        .navbar-brand img {
+            height: 40px;
+            width: auto;
+        }
+        .auth-card {
+            border-radius: 18px;
+            box-shadow: 0 2px 16px rgba(59,130,246,0.08);
+            background: #fff;
+            padding: 2.5rem 2rem;
+        }
+        .btn-primary {
+            background: #2563eb;
+            border-color: #2563eb;
+            font-weight: 600;
+            border-radius: 8px;
+            transition: background 0.18s, border 0.18s;
+        }
+        .btn-primary:hover {
+            background: #1d4ed8;
+            border-color: #1d4ed8;
+        }
+        .form-label {
+            font-weight: 500;
+        }
+        .auth-link {
+            color: #2563eb;
+            text-decoration: none;
+        }
+        .auth-link:hover {
+            color: #22c55e;
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-light py-3">
+        <div class="container">
+            <a class="navbar-brand" href="/">
+                <img src="/images/botbuilderslogo.png" alt="BotBuilders Logo">
+            </a>
+        </div>
+    </nav>
+    <div class="container d-flex align-items-center justify-content-center" style="min-height: 80vh;">
+        <div class="col-md-6 col-lg-4">
+            <div class="auth-card">
+                <h2 class="text-center mb-4 fw-bold" style="color:#2563eb;">Register</h2>
+                <% if (typeof error !== 'undefined') { %>
+                    <div class="alert alert-danger" role="alert">
+                        <%= error %>
+                    </div>
+                <% } %>
+                <form action="/register" method="POST">
+                    <div class="mb-3">
+                        <label for="name" class="form-label">Name</label>
+                        <input type="text" class="form-control" id="name" name="name" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="email" class="form-label">Email</label>
+                        <input type="email" class="form-control" id="email" name="email" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="password" class="form-label">Password</label>
+                        <input type="password" class="form-control" id="password" name="password" required>
+                    </div>
+                    <div class="d-grid mb-3">
+                        <button type="submit" class="btn btn-primary btn-lg">Register</button>
+                    </div>
+                </form>
+                <div class="text-center mt-3">
+                    <p>Already have an account? <a href="/login" class="auth-link">Login</a></p>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html> 

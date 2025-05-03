@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= business.name %> Live Chat</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <% // All color variables and fallbacks at the top %>
+    <% 
+    const headerColor = typeof widgetHeaderColor !== 'undefined' && widgetHeaderColor ? widgetHeaderColor : '#007bff';
+    const headerName = typeof widgetHeaderName !== 'undefined' && widgetHeaderName ? widgetHeaderName : business.name;
+    const quickReplies = Array.isArray(widgetQuickReplies) && widgetQuickReplies.length > 0 ? widgetQuickReplies : [];
+    const h1Color = typeof widgetH1Color !== 'undefined' && widgetH1Color ? widgetH1Color : '#000000';
+    // Messenger's light blue fallback
+    const visitorMessageColor = typeof widgetVisitorMessageColor !== 'undefined' && widgetVisitorMessageColor ? widgetVisitorMessageColor : '#0084FF';
+    const buttonColor = typeof widgetButtonColor !== 'undefined' && widgetButtonColor ? widgetButtonColor : '#0084FF';
+    // Helper to determine if a color is light or dark
+    function isColorDark(hex) {
+        if (!hex) return false;
+        hex = hex.replace('#', '');
+        if (hex.length === 3) hex = hex.split('').map(x => x + x).join('');
+        const r = parseInt(hex.substr(0,2),16);
+        const g = parseInt(hex.substr(2,2),16);
+        const b = parseInt(hex.substr(4,2),16);
+        // Perceived brightness
+        return ((r*299)+(g*587)+(b*114))/1000 < 128;
+    }
+    const menuIconColor = isColorDark(headerColor) ? '#fff' : '#222';
+    %>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            height: 100%;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+            background-color: #f8f9fa;
+            overflow: hidden;
+            color: #333;
+            position: fixed;
+            width: 100%;
+            top: 0;
+            left: 0;
+        }
+        .chat-layout {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            width: 100vw;
+            background-color: #fff;
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            overflow: hidden;
+            max-width: none;
+            margin: 0;
+            box-shadow: none;
+            border-radius: 0;
+        }
+        .chat-header {
+            padding: 15px 30px;
+            border-bottom: 1px solid #e9ecef;
+            background-color: #eee;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            flex-shrink: 0;
+            height: 70px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: relative;
+        }
+        .chat-header h1 {
+            font-size: 1.25rem;
+            color: #000;
+            margin-left: 60px;
+        }
+        .header-menu-button {
+            background: none;
+            border: none;
+            color: #6c757d;
+            font-size: 1.25rem;
+            cursor: pointer;
+            padding: 5px;
+            border-radius: 50%;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background-color 0.2s ease;
+        }
+        .header-menu-button:hover { background-color: rgba(0,0,0,0.05); }
+        .header-menu {
+            display: none;
+            position: absolute;
+            top: 60px;
+            right: 20px;
+            background-color: #fff;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            z-index: 10;
+            min-width: 150px;
+            padding: 8px 0;
+        }
+        .header-menu.menu-open { display: block; }
+        .header-menu-item {
+            display: block;
+            background: none;
+            border: none;
+            width: 100%;
+            padding: 10px 15px;
+            text-align: left;
+            font-size: 0.9rem;
+            color: #333;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+        }
+        .header-menu-item:hover { background-color: #f8f9fa; }
+        #chat-messages {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background-color: #f8f9fa;
+            display: flex;
+            flex-direction: column;
+        }
+        .message-container { margin-bottom: 15px; display: flex; flex-direction: column; }
+        .message { max-width: 75%; padding: 12px 16px; border-radius: 18px; line-height: 1.4; word-wrap: break-word; box-shadow: 0 1px 3px rgba(0,0,0,0.1); position: relative; }
+        .user-message-container { align-items: flex-end; }
+        .bot-message-container, .agent-message-container, .system-message-container { align-items: flex-start; }
+        .user-message { color: white; border-bottom-right-radius: 5px; }
+        .user-message .sender-name, .user-message .message-time { color: rgba(255,255,255,0.8); }
+        .bot-message { background-color: #fff; color: #212529; border: 1px solid #e9ecef; border-bottom-left-radius: 5px; }
+        .agent-message { background-color: #28a745; color: white; border-bottom-left-radius: 5px; }
+        .agent-message .sender-name, .agent-message .message-time { color: rgba(255,255,255,0.8); }
+        .bot-message .sender-name, .agent-message .sender-name { display: none; }
+        .system-message { background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; font-style: italic; text-align: center; max-width: 90%; margin-left: auto; margin-right: auto; border-radius: 8px; }
+        .system-message-container { width: 100%; align-items: center; }
+        .chat-input-container {
+            padding: 15px 20px;
+            border-top: 1px solid #e9ecef;
+            background-color: #eee;
+            box-shadow: 0 -2px 4px rgba(0,0,0,0.05);
+            flex-shrink: 0;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        #chat-form { display: flex; gap: 10px; align-items: center; }
+        #user-input {
+            flex-grow: 1;
+            padding: 10px 15px;
+            border: 1px solid #ced4da;
+            border-radius: 20px;
+            font-size: 1rem;
+            background-color: #f8f9fa;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+        #user-input:focus {
+            outline: none;
+        }
+        .send-button {
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            flex-shrink: 0;
+        }
+        .send-button i { font-size: 1rem; }
+        .quick-replies-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            padding: 10px 20px;
+            background-color: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+            justify-content: flex-end;
+            align-items: center;
+            transition: opacity 0.3s ease, max-height 0.3s ease, padding 0.3s ease, border 0.3s ease;
+            opacity: 1;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .quick-replies-container.hidden {
+            opacity: 0;
+            max-height: 0;
+            padding-top: 0;
+            padding-bottom: 0;
+            border-bottom: none;
+            overflow: hidden;
+        }
+        .quick-reply-button {
+            flex: 0 0 auto;
+            padding: 4px 8px;
+            border: 1px solid #ced4da;
+            border-radius: 20px;
+            background-color: #fff;
+            color: #333;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: background-color 0.2s ease, border-color 0.2s ease;
+            margin: 0;
+        }
+        .quick-reply-button:last-child { margin-right: 0; }
+        .scroll-down-button {
+            position: absolute;
+            bottom: 85px;
+            right: 25px;
+            width: 40px;
+            height: 40px;
+            background-color: #fff;
+            color: #333;
+            border: 1px solid #ccc;
+            border-radius: 50%;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(10px);
+            transition: opacity 0.3s, visibility 0.3s, transform 0.3s;
+            z-index: 5;
+        }
+        .scroll-down-button.visible { opacity: 1; visibility: visible; transform: translateY(0); }
+        .scroll-down-button i { font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+    <div class="chat-layout">
+        <div class="chat-header" style="background-color: <%= headerColor %>;">
+            <h1 style="color: <%= h1Color %>;"><%= headerName %></h1>
+            <div class="header-menu-container">
+                <button class="header-menu-button" id="menu-button" style="color: <%= menuIconColor %>;"><i class="fas fa-ellipsis-v"></i></button>
+                <div class="header-menu" id="header-menu">
+                    <button class="header-menu-item" id="new-chat-button">Start New Chat</button>
+                </div>
+            </div>
+        </div>
+        <div id="chat-messages">
+            <% if (messages && messages.length > 0) { %>
+                <% messages.forEach(function(msg) { %>
+                    <% if (msg.sender_type === 'user') { %>
+                        <div class="message-container user-message-container">
+                            <div class="message user-message" style="background-color: <%= visitorMessageColor %>; color: #fff; border-bottom-right-radius: 5px; text-align: right; margin-left: auto;"><%= msg.content %></div>
+                        </div>
+                    <% } else if (msg.sender_type === 'agent') { %>
+                        <div class="message-container agent-message-container">
+                            <div class="message agent-message" style="background-color: #22c55e; color: #fff; border-bottom-left-radius: 5px; text-align: left; margin-right: auto;"><%= msg.content %></div>
+                        </div>
+                    <% } else if (msg.sender_type === 'bot') { %>
+                        <div class="message-container bot-message-container">
+                            <div class="message bot-message" style="background-color: #fff; color: #222; border-bottom-left-radius: 5px; text-align: left; margin-right: auto;"><%= msg.content %></div>
+                        </div>
+                    <% } %>
+                <% }); %>
+            <% } else { %>
+                <div class="message-container bot-message-container">
+                    <div class="message bot-message" style="background-color: #fff; color: #222; border-bottom-left-radius: 5px; text-align: left; margin-right: auto;">
+                        <div>Hello! I'm Sarla, your friendly bot assistant.</div>
+                    </div>
+                </div>
+                <div class="message-container bot-message-container">
+                    <div class="message bot-message" style="background-color: #fff; color: #222; border-bottom-left-radius: 5px; text-align: left; margin-right: auto;">
+                        <div><img src="https://chatbots.hellomarky.com/sarlawaving.png" alt="Chat Image" style="max-width: 150px; max-height: 150px; border-radius: 10px; margin-top: 5px;"></div>
+                    </div>
+                </div>
+                <div class="message-container bot-message-container">
+                    <div class="message bot-message" style="background-color: #fff; color: #222; border-bottom-left-radius: 5px; text-align: left; margin-right: auto;">
+                        <div>I'm here to help with any question you have!</div>
+                    </div>
+                </div>
+            <% } %>
+        </div>
+        <% if ((!messages || messages.length === 0) && quickReplies && quickReplies.length > 0) { %>
+        <div id="quick-replies" class="quick-replies-container">
+            <% quickReplies.forEach(function(reply) { %>
+                <button class="quick-reply-button" style="border-color: <%= visitorMessageColor %>;" onmouseover="this.style.backgroundColor='<%= visitorMessageColor %>';this.style.color='#fff';" onmouseout="this.style.backgroundColor='#fff';this.style.color='#333';"><%= reply %></button>
+            <% }); %>
+        </div>
+        <% } %>
+        <div class="chat-input-container">
+            <form id="chat-form">
+                <input type="text" id="user-input" placeholder="Type your message..." style="border-color: #ced4da;" onfocus="this.style.borderColor='<%= visitorMessageColor %>';this.style.boxShadow='0 0 0 0.2rem <%= visitorMessageColor %>33';" onblur="this.style.borderColor='#ced4da';this.style.boxShadow='none';">
+                <button type="submit" class="send-button" style="background-color: <%= buttonColor %>; color: #fff;"><i class="fas fa-paper-plane"></i></button>
+            </form>
+        </div>
+        <button id="scroll-down-button" class="scroll-down-button" title="Scroll to bottom">
+            <i class="fas fa-chevron-down"></i>
+        </button>
+    </div>
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        // Expose EJS color variable to JS
+        const VISITOR_MESSAGE_COLOR = "<%= visitorMessageColor %>";
+        const BUTTON_COLOR = "<%= buttonColor %>";
+        // Menu logic
+        const menuButton = document.getElementById('menu-button');
+        const headerMenu = document.getElementById('header-menu');
+        const newChatButton = document.getElementById('new-chat-button');
+        menuButton.addEventListener('click', (event) => {
+            event.stopPropagation();
+            headerMenu.classList.toggle('menu-open');
+        });
+        newChatButton.addEventListener('click', () => {
+            const confirmation = window.confirm("Are you sure you want to start a new chat? All current conversation history will be lost.");
+            if (confirmation) {
+                // Remove visitorId cookie and reload
+                document.cookie = 'visitorId=; Max-Age=0; path=/;';
+                location.reload();
+            }
+            headerMenu.classList.remove('menu-open');
+        });
+        document.addEventListener('click', (event) => {
+            if (!headerMenu.contains(event.target) && !menuButton.contains(event.target)) {
+                headerMenu.classList.remove('menu-open');
+            }
+        });
+        // Quick replies logic (emit message on click)
+        document.getElementById('quick-replies')?.addEventListener('click', function(event) {
+            if (event.target.classList.contains('quick-reply-button')) {
+                const msg = event.target.textContent.trim();
+                if (msg) {
+                    sendMessage(msg);
+                }
+            }
+        });
+        // Chat logic
+        const socket = io();
+        const chatForm = document.getElementById('chat-form');
+        const chatInput = document.getElementById('user-input');
+        const chatBody = document.getElementById('chat-messages');
+        const scrollDownButton = document.getElementById('scroll-down-button');
+        socket.emit('visitor join', { businessId: '<%= business.id %>', visitorId: '<%= visitorId %>' });
+        chatForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const msg = chatInput.value.trim();
+            if (!msg) return;
+            sendMessage(msg);
+            chatInput.value = '';
+        });
+        function sendMessage(msg) {
+            // Hide quick replies as soon as user interacts
+            const quickReplies = document.getElementById('quick-replies');
+            if (quickReplies) quickReplies.classList.add('hidden');
+            socket.emit('visitor message', { content: msg, businessId: '<%= business.id %>', visitorId: '<%= visitorId %>' });
+        }
+        socket.on('chat message', function(data) {
+            appendMessage(data.sender_type, data.content);
+        });
+        function appendMessage(sender_type, content) {
+            const container = document.createElement('div');
+            container.className = 'message-container ' + (sender_type === 'user' ? 'user-message-container' : 'bot-message-container');
+            const div = document.createElement('div');
+            div.className = 'message ' + (sender_type === 'user' ? 'user-message' : 'bot-message');
+            div.textContent = content;
+            if (sender_type === 'user') {
+                div.style.backgroundColor = VISITOR_MESSAGE_COLOR;
+                div.style.color = '#fff';
+                div.style.borderBottomRightRadius = '5px';
+                div.style.textAlign = 'right';
+                div.style.marginLeft = 'auto';
+            } else if (sender_type === 'agent') {
+                div.style.backgroundColor = '#22c55e';
+                div.style.color = '#fff';
+                div.style.borderBottomLeftRadius = '5px';
+                div.style.textAlign = 'left';
+                div.style.marginRight = 'auto';
+            } else if (sender_type === 'bot') {
+                div.style.backgroundColor = '#fff';
+                div.style.color = '#222';
+                div.style.borderBottomLeftRadius = '5px';
+                div.style.textAlign = 'left';
+                div.style.marginRight = 'auto';
+            }
+            container.appendChild(div);
+            chatBody.appendChild(container);
+            chatBody.scrollTop = chatBody.scrollHeight;
+        }
+        // Scroll down button logic
+        chatBody.addEventListener('scroll', () => {
+            const threshold = 200;
+            const isNearBottom = chatBody.scrollHeight - chatBody.scrollTop - chatBody.clientHeight < threshold;
+            if (isNearBottom) {
+                scrollDownButton.classList.remove('visible');
+            } else {
+                if (chatBody.scrollHeight > chatBody.clientHeight + threshold) {
+                    scrollDownButton.classList.add('visible');
+                }
+            }
+        });
+        scrollDownButton.addEventListener('click', () => {
+            chatBody.scrollTo({ top: chatBody.scrollHeight, behavior: 'smooth' });
+        });
+    </script>
+</body>
+</html> 

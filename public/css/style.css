@@ -1,0 +1,150 @@
+/* Custom styles for the chat app */
+.navbar {
+    box-shadow: 0 2px 4px rgba(0,0,0,.1);
+}
+
+.display-4 {
+    font-weight: 600;
+    color: #2c3e50;
+}
+
+.lead {
+    color: #7f8c8d;
+}
+
+.card {
+    border: none;
+    box-shadow: 0 2px 4px rgba(0,0,0,.05);
+    transition: transform 0.2s;
+}
+
+.card:hover {
+    transform: translateY(-5px);
+}
+
+.card-title {
+    color: #2c3e50;
+    font-weight: 600;
+}
+
+.btn-primary {
+    background-color: #3498db;
+    border-color: #3498db;
+}
+
+.btn-primary:hover {
+    background-color: #2980b9;
+    border-color: #2980b9;
+}
+
+.btn-outline-primary {
+    color: #3498db;
+    border-color: #3498db;
+}
+
+.btn-outline-primary:hover {
+    background-color: #3498db;
+    border-color: #3498db;
+}
+
+footer {
+    margin-top: 100px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .display-4 {
+        font-size: 2.5rem;
+    }
+    
+    .lead {
+        font-size: 1.1rem;
+    }
+}
+
+#conversationsList .chat-preview.active {
+  background: #e6f0ff !important;
+  border-left: 4px solid #007bff !important;
+  box-shadow: 0 2px 8px rgba(0,123,255,0.08);
+}
+
+#conversationsList .chat-preview.active.unread-preview {
+  background: #e6f0ff !important;
+}
+
+.chat-preview.unread-preview {
+  background: #f0f6ff;
+}
+
+.unread-message {
+  font-weight: bold;
+  color: #222;
+}
+
+/* Add Business Form Styles */
+.add-business-container {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f7fafd;
+}
+.add-business-card {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+  padding: 2.5rem 2rem 2rem 2rem;
+  max-width: 400px;
+  width: 100%;
+}
+.add-business-card h2 {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #2c3e50;
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+.add-business-card form {
+  display: flex;
+  flex-direction: column;
+}
+.add-business-card label {
+  font-weight: 500;
+  color: #34495e;
+  margin-bottom: 0.5rem;
+}
+.add-business-card input[type="text"] {
+  border-radius: 6px;
+  border: 1px solid #dbeafe;
+  padding: 1rem 1rem;
+  font-size: 1.1rem;
+  margin-bottom: 1.5rem;
+  width: 100%;
+  transition: border 0.2s;
+  box-sizing: border-box;
+}
+.add-business-card input[type="text"]:focus {
+  border-color: #3498db;
+  outline: none;
+}
+.add-business-card button {
+  background: #3498db;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.9rem 1rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+  width: 100%;
+  transition: background 0.2s;
+  margin-top: 0.5rem;
+  letter-spacing: 0.5px;
+  text-align: center;
+}
+.add-business-card button:hover {
+  background: #217dbb;
+}
+
+body, input, button, select, textarea, h1, h2, h3, h4, h5, h6 {
+  font-family: 'Inter', system-ui, sans-serif;
+} 
