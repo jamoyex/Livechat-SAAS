@@ -72,4 +72,16 @@ CREATE TABLE IF NOT EXISTS messages (
     FOREIGN KEY (sender_id) REFERENCES business_users(id),
     INDEX idx_conversation_created (conversation_id, created_at),
     INDEX idx_is_read (is_read)
+);
+
+-- AI Training Data table
+CREATE TABLE IF NOT EXISTS ai_training_data (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    business_id INT NOT NULL,
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (business_id) REFERENCES businesses(id),
+    INDEX idx_business (business_id)
 ); 

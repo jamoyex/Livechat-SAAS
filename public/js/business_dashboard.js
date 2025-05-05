@@ -41,6 +41,28 @@ const chatbaseAgentId = document.getElementById('chatbase_agent_id');
 const n8nWebhookUrl = document.getElementById('n8n_webhook_url');
 const n8nSystemPrompt = document.getElementById('n8n_system_prompt');
 
+// AI Training Data functionality
+const trainingDataTableBody = document.getElementById('trainingDataTableBody');
+const addTrainingForm = document.getElementById('addTrainingForm');
+const saveTrainingBtn = document.getElementById('saveTrainingBtn');
+
+// Notification sound logic
+const notificationAudio = document.getElementById('notificationSound');
+const notificationToggle = document.getElementById('notificationToggle');
+
+// Load notification setting from localStorage
+let notificationsEnabled = localStorage.getItem('dashboardNotificationsEnabled');
+if (notificationsEnabled === null) notificationsEnabled = 'true';
+notificationsEnabled = notificationsEnabled === 'true';
+if (notificationToggle) notificationToggle.checked = notificationsEnabled;
+
+if (notificationToggle) {
+    notificationToggle.addEventListener('change', function() {
+        notificationsEnabled = this.checked;
+        localStorage.setItem('dashboardNotificationsEnabled', notificationsEnabled);
+    });
+}
+
 // Listen for business selector changes
 const businessSelector = document.getElementById('businessSelector');
 if (businessSelector) {
@@ -65,6 +87,8 @@ async function loadAllDashboardData() {
     loadWidgetSettings();
     // Load AI settings
     loadAISettings();
+    // Load training data
+    loadTrainingData();
     // Reset chat UI
     chatMessages.innerHTML = '';
     conversationTitle.textContent = 'Select a conversation';
@@ -253,9 +277,45 @@ socket.on('chat message', data => {
     console.log('Received chat message event:', data);
     if (data.conversationId == currentConversationId) {
         renderMessage(data);
+        // Play notification sound if it's a user/visitor message and notifications are enabled
+        if (data.sender_type === 'user' && notificationsEnabled && notificationAudio) {
+            notificationAudio.currentTime = 0;
+            notificationAudio.play();
+        }
     }
     if (data.conversationId != currentConversationId) {
         loadConversations();
+    }
+});
+
+// Listen for new conversation (new user message in a new conversation)
+socket.on('new conversation', data => {
+    if (data.businessId == currentBusinessId) {
+        loadConversations();
+        // Play notification sound for new user message in a new conversation (not currently open)
+        if (notificationsEnabled && notificationAudio) {
+            // Only play if not currently viewing this conversation
+            if (data.conversationId != currentConversationId) {
+                notificationAudio.currentTime = 0;
+                notificationAudio.play();
+            }
+        }
+    }
+});
+
+// Listen for conversation update (e.g., new message, status change)
+socket.on('update conversation', data => {
+    if (data.businessId == currentBusinessId) {
+        loadConversations();
+        // Play notification sound for new user message in another conversation (not currently open)
+        if (notificationsEnabled && notificationAudio) {
+            if (data.conversationId != currentConversationId) {
+                // To avoid false positives, optionally check if the update is due to a new user message
+                // (If you have more detailed data, you can check sender_type here)
+                notificationAudio.currentTime = 0;
+                notificationAudio.play();
+            }
+        }
     }
 });
 
@@ -415,6 +475,109 @@ if (aiSettingsForm) {
     });
 }
 
+// Load training data
+async function loadTrainingData() {
+    if (!currentBusinessId) return;
+    try {
+        const response = await fetch(`/api/business/${currentBusinessId}/training-data`);
+        const data = await response.json();
+        if (data.success) {
+            trainingDataTableBody.innerHTML = data.trainingData.map(item => `
+                <tr>
+                    <td>${item.question}</td>
+                    <td>${item.answer}</td>
+                    <td>${new Date(item.updated_at).toLocaleString()}</td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-primary me-1" onclick="editTrainingData(${item.id})">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="deleteTrainingData(${item.id})">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+    } catch (error) {
+        console.error('Error loading training data:', error);
+        showAlert('Failed to load training data', 'danger');
+    }
+}
+
+// Save new training data
+if (saveTrainingBtn) {
+    saveTrainingBtn.addEventListener('click', async function() {
+        if (!currentBusinessId) return;
+        const question = document.getElementById('trainingQuestion').value;
+        const answer = document.getElementById('trainingAnswer').value;
+        
+        if (!question || !answer) {
+            showAlert('Please fill in all fields', 'warning');
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/business/${currentBusinessId}/training-data`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ question, answer })
+            });
+            const data = await response.json();
+            if (data.success) {
+                showAlert('Training data saved successfully', 'success');
+                bootstrap.Modal.getInstance(document.getElementById('addTrainingModal')).hide();
+                addTrainingForm.reset();
+                loadTrainingData();
+            } else {
+                showAlert('Failed to save training data', 'danger');
+            }
+        } catch (error) {
+            console.error('Error saving training data:', error);
+            showAlert('An error occurred while saving training data', 'danger');
+        }
+    });
+}
+
+// Edit training data
+async function editTrainingData(id) {
+    if (!currentBusinessId) return;
+    try {
+        const response = await fetch(`/api/business/${currentBusinessId}/training-data/${id}`);
+        const data = await response.json();
+        if (data.success) {
+            document.getElementById('trainingQuestion').value = data.trainingData.question;
+            document.getElementById('trainingAnswer').value = data.trainingData.answer;
+            saveTrainingBtn.dataset.editId = id;
+            bootstrap.Modal.getInstance(document.getElementById('addTrainingModal')).show();
+        }
+    } catch (error) {
+        console.error('Error loading training data for edit:', error);
+        showAlert('Failed to load training data for editing', 'danger');
+    }
+}
+
+// Delete training data
+async function deleteTrainingData(id) {
+    if (!currentBusinessId || !confirm('Are you sure you want to delete this training data?')) return;
+    try {
+        const response = await fetch(`/api/business/${currentBusinessId}/training-data/${id}`, {
+            method: 'DELETE'
+        });
+        const data = await response.json();
+        if (data.success) {
+            showAlert('Training data deleted successfully', 'success');
+            loadTrainingData();
+        } else {
+            showAlert('Failed to delete training data', 'danger');
+        }
+    } catch (error) {
+        console.error('Error deleting training data:', error);
+        showAlert('An error occurred while deleting training data', 'danger');
+    }
+}
+
 // On initial load
 loadConversations();
 
@@ -422,20 +585,6 @@ loadConversations();
 if (currentBusinessId) {
     socket.emit('join business', { businessId: currentBusinessId });
 }
-
-// Listen for new conversation
-socket.on('new conversation', data => {
-    if (data.businessId == currentBusinessId) {
-        loadConversations();
-    }
-});
-
-// Listen for conversation update (e.g., new message, status change)
-socket.on('update conversation', data => {
-    if (data.businessId == currentBusinessId) {
-        loadConversations();
-    }
-});
 
 // Listen for conversation delete
 socket.on('delete conversation', data => {
@@ -458,4 +607,12 @@ function showAlert(message, type = 'info') {
     setTimeout(() => {
         alert.remove();
     }, 3000);
+}
+
+// Sidebar tab navigation
+const tabTraining = document.getElementById('tab-training');
+if (tabTraining) {
+    tabTraining.addEventListener('click', function() {
+        loadTrainingData();
+    });
 } 

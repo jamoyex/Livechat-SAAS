@@ -294,25 +294,32 @@
 </head>
 <body>
     <!-- Dashboard Header -->
-    <header class="dashboard-header d-flex align-items-center px-4 py-3 border-bottom" style="height: 72px;">
+    <header class="dashboard-header d-flex align-items-center px-4 py-3 border-bottom justify-content-between" style="height: 72px;">
         <img src="/images/BotBuilders_Logo_White_2.png" alt="Logo" class="logo-img">
+        <div class="form-check form-switch ms-2">
+            <input class="form-check-input" type="checkbox" id="notificationToggle">
+            <label class="form-check-label text-white" for="notificationToggle">Notification Sound</label>
+        </div>
     </header>
     <div class="dashboard-root">
         <!-- Sidebar Navigation -->
         <div class="sidebar col-12 col-md-3 p-0 d-flex flex-column">
-            <div class="p-3 border-bottom bg-white">
-                <h5 class="mb-0">Your Businesses</h5>
-                <select id="businessSelector" class="form-select mt-2">
-                    <% businesses.forEach(function(biz) { %>
-                        <option value="<%= biz.id %>" <%= biz.id === selectedBusiness.id ? 'selected' : '' %>><%= biz.name %></option>
-                    <% }); %>
-                </select>
+            <div class="p-3 border-bottom bg-white d-flex align-items-center justify-content-between">
+                <div>
+                    <h5 class="mb-0">Your Businesses</h5>
+                    <select id="businessSelector" class="form-select mt-2">
+                        <% businesses.forEach(function(biz) { %>
+                            <option value="<%= biz.id %>" <%= biz.id === selectedBusiness.id ? 'selected' : '' %>><%= biz.name %></option>
+                        <% }); %>
+                    </select>
+                </div>
             </div>
             <nav class="sidebar-nav nav flex-column nav-pills p-2 gap-2">
                 <a class="nav-link active" id="tab-chats" href="#" data-tab="chats"><i class="fas fa-comments me-2"></i>Chats</a>
                 <a class="nav-link" id="tab-team" href="#" data-tab="team"><i class="fas fa-users me-2"></i>Team Members</a>
                 <a class="nav-link" id="tab-widget" href="#" data-tab="widget"><i class="fas fa-cog me-2"></i>Widget Settings</a>
                 <a class="nav-link" id="tab-ai" href="#" data-tab="ai"><i class="fas fa-robot me-2"></i>AI Settings</a>
+                <a class="nav-link" id="tab-training" href="#" data-tab="training"><i class="fas fa-graduation-cap me-2"></i>AI Training Info</a>
                 <a class="nav-link" id="tab-install" href="#" data-tab="install"><i class="fas fa-code me-2"></i>Install Widget</a>
                 <a class="nav-link mt-auto text-danger" href="/logout"><i class="fas fa-sign-out-alt me-2"></i>Logout</a>
             </nav>
@@ -460,31 +467,92 @@
                                 <div class="card-body">
                                     <h4 class="card-title mb-4">AI Agent Settings</h4>
                                     <form id="aiSettingsForm">
-                                        <div class="mb-3">
+                                        <div class="mb-3" style="display: none;">
                                             <label class="form-label" for="chatbase_api_key">Chatbase API Key</label>
                                             <input type="password" class="form-control" id="chatbase_api_key" name="chatbase_api_key" value="<%= selectedBusiness.chatbase_api_key || '' %>" placeholder="Enter your Chatbase API key">
                                             <div class="form-text">Your Chatbase API key for AI agent integration</div>
                                         </div>
-                                        <div class="mb-3">
+                                        <div class="mb-3" style="display: none;">
                                             <label class="form-label" for="chatbase_agent_id">Chatbase Agent ID</label>
                                             <input type="text" class="form-control" id="chatbase_agent_id" name="chatbase_agent_id" value="<%= selectedBusiness.chatbase_agent_id || '' %>" placeholder="Enter your Chatbase Agent ID">
                                             <div class="form-text">The ID of your Chatbase AI agent</div>
                                         </div>
                                         <hr class="my-4">
-                                        <h5 class="mb-3">N8N Integration</h5>
-                                        <div class="mb-3">
+                                        <h5 class="mb-3" style="display: none;">N8N Integration</h5>
+                                        <div class="mb-3" style="display: none;">
                                             <label class="form-label" for="n8n_webhook_url">N8N Webhook URL</label>
                                             <input type="url" class="form-control" id="n8n_webhook_url" name="n8n_webhook_url" value="<%= selectedBusiness.n8n_webhook_url || '' %>" placeholder="Enter your N8N webhook URL">
                                             <div class="form-text">The webhook URL for your N8N AI agent workflow</div>
                                         </div>
                                         <div class="mb-3">
                                             <label class="form-label" for="n8n_system_prompt">System Prompt</label>
-                                            <textarea class="form-control" id="n8n_system_prompt" name="n8n_system_prompt" rows="6" placeholder="Enter the system prompt for your N8N AI agent"><%= selectedBusiness.n8n_system_prompt || '' %></textarea>
+                                            <textarea class="form-control" id="n8n_system_prompt" name="n8n_system_prompt" rows="6" placeholder="Enter the system prompt for your AI agent"><%= selectedBusiness.n8n_system_prompt || '' %></textarea>
                                             <div class="form-text">The system prompt that defines your AI agent's behavior and personality</div>
                                         </div>
                                         <button type="submit" class="btn btn-primary">Save AI Settings</button>
                                     </form>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+            <!-- AI Training Info Section -->
+            <section id="section-training" class="tab-section scrollable">
+                <div class="container py-4">
+                    <div class="row justify-content-center">
+                        <div class="col-md-10">
+                            <div class="card">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between align-items-center mb-4">
+                                        <h4 class="card-title mb-0">AI Training Data</h4>
+                                        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addTrainingModal">
+                                            <i class="fas fa-plus me-1"></i>Add Training Data
+                                        </button>
+                                    </div>
+                                    <div id="trainingDataList" class="table-responsive">
+                                        <table class="table table-hover">
+                                            <thead>
+                                                <tr>
+                                                    <th>Question</th>
+                                                    <th>Answer</th>
+                                                    <th>Last Updated</th>
+                                                    <th>Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="trainingDataTableBody">
+                                                <!-- Training data will be loaded here -->
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Add Training Data Modal -->
+                <div class="modal fade" id="addTrainingModal" tabindex="-1" aria-labelledby="addTrainingModalLabel" aria-hidden="true">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title" id="addTrainingModalLabel">Add Training Data</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                            </div>
+                            <div class="modal-body">
+                                <form id="addTrainingForm">
+                                    <div class="mb-3">
+                                        <label for="trainingQuestion" class="form-label">Question</label>
+                                        <textarea class="form-control" id="trainingQuestion" rows="3" required></textarea>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="trainingAnswer" class="form-label">Answer</label>
+                                        <textarea class="form-control" id="trainingAnswer" rows="5" required></textarea>
+                                    </div>
+                                </form>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                <button type="button" class="btn btn-primary" id="saveTrainingBtn">Save Training Data</button>
                             </div>
                         </div>
                     </div>
@@ -497,7 +565,8 @@
                         <div class="card-body">
                             <h4 class="fw-semibold">Widget Embed Instructions</h4>
                             <p>Embed this chat widget on your website:</p>
-                            <pre class="bg-light p-2 border rounded"><code>&lt;style&gt;
+                            <div class="mb-3 position-relative">
+                                <textarea id="widgetEmbedCode" class="form-control" rows="12" readonly style="font-family: monospace; resize: vertical; min-height: 180px; background: #f8f9fa;">&lt;style&gt;
   #chat-launcher {
     position: fixed;
     bottom: 20px;
@@ -586,7 +655,10 @@
     launcher.style.display = isOpen ? 'block' : 'none';
     closeBtn.style.display = isOpen ? 'none' : 'block';
   }
-&lt;/script&gt;</code></pre>
+&lt;/script&gt;</textarea>
+                                <button id="copyWidgetCodeBtn" class="btn btn-outline-primary position-absolute" style="top: 10px; right: 10px;">Copy Code</button>
+                            </div>
+                            <div id="copyWidgetCodeMsg" class="text-success ms-2" style="display:none;">Copied!</div>
                             <p class="mt-2">Or open your chat widget directly: <a href="https://<%= host %>/widget/<%= selectedBusiness.id %>" target="_blank">https://<%= host %>/widget/<%= selectedBusiness.id %></a></p>
                         </div>
                     </div>
@@ -594,6 +666,7 @@
             </section>
         </div>
     </div>
+    <audio id="notificationSound" src="/sounds/notification.mp3" preload="auto" style="display:none;"></audio>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="/socket.io/socket.io.js"></script>
     <script src="/js/business_dashboard.js"></script>
@@ -621,6 +694,15 @@
                 window.location = '/logout';
             });
         }
+        document.getElementById('copyWidgetCodeBtn').addEventListener('click', function() {
+            const textarea = document.getElementById('widgetEmbedCode');
+            textarea.select();
+            textarea.setSelectionRange(0, 99999); // For mobile
+            document.execCommand('copy');
+            const msg = document.getElementById('copyWidgetCodeMsg');
+            msg.style.display = 'inline';
+            setTimeout(() => { msg.style.display = 'none'; }, 1200);
+        });
     </script>
 </body>
 </html> 

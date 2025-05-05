@@ -309,7 +309,8 @@ io.on('connection', (socket) => {
                 const n8nPayload = {
                     message: content,
                     system_prompt: business.n8n_system_prompt || '',
-                    session_id: visitorId
+                    session_id: visitorId,
+                    business_id: businessId
                 };
                 const n8nRes = await fetch(business.n8n_webhook_url, {
                     method: 'POST',
@@ -1010,6 +1011,136 @@ app.get('/api/business/:businessId/ai-settings', requireLogin, async (req, res) 
         });
     } catch (error) {
         console.error('Error fetching AI settings:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// API endpoints for AI Training Data
+// Get all training data for a business
+app.get('/api/business/:businessId/training-data', requireLogin, async (req, res) => {
+    const businessId = parseInt(req.params.businessId);
+    const userId = req.session.userId;
+
+    try {
+        // Check if user has access to this business
+        const [business] = await pool.execute(
+            'SELECT * FROM businesses WHERE id = ? AND (owner_user_id = ? OR id IN (SELECT business_id FROM business_users WHERE user_id = ?))',
+            [businessId, userId, userId]
+        );
+
+        if (business.length === 0) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+
+        // Get training data
+        const [trainingData] = await pool.execute(
+            'SELECT * FROM ai_training_data WHERE business_id = ? ORDER BY updated_at DESC',
+            [businessId]
+        );
+
+        res.json({
+            success: true,
+            trainingData
+        });
+    } catch (error) {
+        console.error('Error fetching training data:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Add new training data
+app.post('/api/business/:businessId/training-data', requireLogin, async (req, res) => {
+    const businessId = parseInt(req.params.businessId);
+    const userId = req.session.userId;
+    const { question, answer } = req.body;
+
+    try {
+        // Check if user has access to this business
+        const [business] = await pool.execute(
+            'SELECT * FROM businesses WHERE id = ? AND (owner_user_id = ? OR id IN (SELECT business_id FROM business_users WHERE user_id = ? AND role = "admin"))',
+            [businessId, userId, userId]
+        );
+
+        if (business.length === 0) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+
+        // Insert training data
+        await pool.execute(
+            'INSERT INTO ai_training_data (business_id, question, answer) VALUES (?, ?, ?)',
+            [businessId, question, answer]
+        );
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error adding training data:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Get single training data entry
+app.get('/api/business/:businessId/training-data/:id', requireLogin, async (req, res) => {
+    const businessId = parseInt(req.params.businessId);
+    const trainingId = parseInt(req.params.id);
+    const userId = req.session.userId;
+
+    try {
+        // Check if user has access to this business
+        const [business] = await pool.execute(
+            'SELECT * FROM businesses WHERE id = ? AND (owner_user_id = ? OR id IN (SELECT business_id FROM business_users WHERE user_id = ?))',
+            [businessId, userId, userId]
+        );
+
+        if (business.length === 0) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+
+        // Get training data
+        const [trainingData] = await pool.execute(
+            'SELECT * FROM ai_training_data WHERE id = ? AND business_id = ?',
+            [trainingId, businessId]
+        );
+
+        if (trainingData.length === 0) {
+            return res.status(404).json({ error: 'Training data not found' });
+        }
+
+        res.json({
+            success: true,
+            trainingData: trainingData[0]
+        });
+    } catch (error) {
+        console.error('Error fetching training data:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Delete training data
+app.delete('/api/business/:businessId/training-data/:id', requireLogin, async (req, res) => {
+    const businessId = parseInt(req.params.businessId);
+    const trainingId = parseInt(req.params.id);
+    const userId = req.session.userId;
+
+    try {
+        // Check if user has access to this business
+        const [business] = await pool.execute(
+            'SELECT * FROM businesses WHERE id = ? AND (owner_user_id = ? OR id IN (SELECT business_id FROM business_users WHERE user_id = ? AND role = "admin"))',
+            [businessId, userId, userId]
+        );
+
+        if (business.length === 0) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+
+        // Delete training data
+        await pool.execute(
+            'DELETE FROM ai_training_data WHERE id = ? AND business_id = ?',
+            [trainingId, businessId]
+        );
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error deleting training data:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
