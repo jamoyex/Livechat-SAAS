@@ -34,6 +34,13 @@ const widgetButtonColor = document.getElementById('widget_button_color');
 const widgetVisitorMessageColor = document.getElementById('widget_visitor_message_color');
 const widgetPreviewIframe = document.getElementById('widgetPreviewIframe');
 
+// AI Settings logic
+const aiSettingsForm = document.getElementById('aiSettingsForm');
+const chatbaseApiKey = document.getElementById('chatbase_api_key');
+const chatbaseAgentId = document.getElementById('chatbase_agent_id');
+const n8nWebhookUrl = document.getElementById('n8n_webhook_url');
+const n8nSystemPrompt = document.getElementById('n8n_system_prompt');
+
 // Listen for business selector changes
 const businessSelector = document.getElementById('businessSelector');
 if (businessSelector) {
@@ -56,6 +63,8 @@ async function loadAllDashboardData() {
     loadTeamMembers();
     // Load widget settings
     loadWidgetSettings();
+    // Load AI settings
+    loadAISettings();
     // Reset chat UI
     chatMessages.innerHTML = '';
     conversationTitle.textContent = 'Select a conversation';
@@ -99,6 +108,44 @@ async function loadConversations(page = 1, search = '') {
     loadMoreBtn.style.display = data.hasMore ? '' : 'none';
 }
 
+// Format message (markdown, images, links)
+function formatMessage(text) {
+    if (typeof text !== 'string') return text;
+    let escapedText = text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    escapedText = escapedText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    escapedText = escapedText.replace(/_([^_]+)_/g, '<em>$1</em>');
+    escapedText = escapedText.replace(/^\*\s+/gm, '&bull; ').replace(/^\-\s+/gm, '&bull; ');
+    escapedText = escapedText.replace(/^(\d+)\.\s+/gm, '$1. ');
+    // Markdown Images ![alt](url) - ensure line breaks before and after
+    escapedText = escapedText.replace(/!\[([^\]]*)\]\((.*?)\)/g, '<br><div class="chat-image"><img src="$2" alt="$1" style="max-width:250px;max-height:250px;border-radius:10px;margin:10px 0;"></div><br>');
+    // Markdown Links [text](url)
+    escapedText = escapedText.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" style="color: #007bff; text-decoration: underline;">$1</a>');
+    // Plain image URLs - ensure line breaks before and after
+    escapedText = escapedText.replace(/(https?:\/\/[^\s<>"]+\.(?:jpg|jpeg|png|gif|webp))/gi, url =>
+        `<br><div class="chat-image"><img src="${url}" alt="Image" style="max-width:250px;max-height:250px;border-radius:10px;margin:10px 0;"></div><br>`
+    );
+    // Plain non-image URLs
+    escapedText = escapedText.replace(/(https?:\/\/[^\s<>"]+)/gi, url => {
+        if (/\.(jpg|jpeg|png|gif|webp)$/i.test(url)) return url;
+        if (escapedText.includes(`href=\"${url}\"`)) return url;
+        return `<a href="${url}" target="_blank" style="color: #007bff; text-decoration: underline;">${url}</a>`;
+    });
+    // Newlines to <br>
+    escapedText = escapedText.replace(/\n/g, '<br>');
+    // Remove duplicate <br> before/after images for cleaner output
+    escapedText = escapedText.replace(/(<br>\s*){2,}/g, '<br>');
+    escapedText = escapedText.replace(/(<br>\s*)+(<div class=\"chat-image\")/g, '<br>$2');
+    escapedText = escapedText.replace(/(<\/div>\s*)+(<br>)/g, '</div><br>');
+    return escapedText;
+}
+
+// Add chat-image CSS for spacing and centering
+(function() {
+    const style = document.createElement('style');
+    style.innerHTML = `.chat-image { text-align: center; margin: 10px 0; }`;
+    document.head.appendChild(style);
+})();
+
 // Render a single message in the chat area
 function renderMessage(msg) {
     const div = document.createElement('div');
@@ -121,7 +168,7 @@ function renderMessage(msg) {
         div.style.marginLeft = 'auto';
         div.style.alignSelf = 'flex-end';
     }
-    div.textContent = msg.content || msg.message || '';
+    div.innerHTML = formatMessage(msg.content || msg.message || '');
     chatMessages.appendChild(div);
     chatMessages.scrollTop = chatMessages.scrollHeight;
 }
@@ -147,6 +194,15 @@ async function selectConversation(conversationId) {
     console.log('Joined conversation room:', conversationId);
     previousConversationId = conversationId;
     currentConversationId = conversationId;
+    // Fetch conversation metadata (status)
+    let status = 'active';
+    try {
+        const res = await fetch(`/api/business/${currentBusinessId}/conversations/${conversationId}`);
+        const data = await res.json();
+        if (data.conversation && data.conversation.status) {
+            status = data.conversation.status;
+        }
+    } catch (e) {}
     // Manually update highlight (no reload)
     document.querySelectorAll('.chat-preview').forEach(div => {
         if (div.dataset.id == conversationId.toString()) {
@@ -165,10 +221,26 @@ async function selectConversation(conversationId) {
     await Promise.all([markReadPromise, loadMessagesPromise]);
     // After both complete, refresh conversations list to update unread status
     await loadConversations(1, searchTerm);
+    // UI logic for status
+    if (status === 'active') {
+        messageInput.disabled = true;
+        messageForm.querySelector('button[type="submit"]').disabled = true;
+        takeOverBtn.classList.remove('d-none');
+        letBotHandleBtn.classList.add('d-none');
+        activeNotice.classList.remove('d-none');
+    } else {
+        messageInput.disabled = false;
+        messageForm.querySelector('button[type="submit"]').disabled = false;
+        takeOverBtn.classList.add('d-none');
+        letBotHandleBtn.classList.remove('d-none');
+        activeNotice.classList.add('d-none');
+    }
+    deleteConversationBtn.classList.remove('d-none');
 }
 
 // Send message
 messageForm.onsubmit = async e => {
+    if (messageInput.disabled) return;
     e.preventDefault();
     const msg = messageInput.value.trim();
     if (!msg || !currentConversationId) return;
@@ -202,7 +274,7 @@ letBotHandleBtn.onclick = async () => {
 // Delete conversation
 deleteConversationBtn.onclick = async () => {
     if (!currentConversationId) return;
-    if (!confirm('Are you sure you want to delete this conversation?')) return;
+    if (!confirm('Are you sure you want to delete this conversation and all its messages? This cannot be undone.')) return;
     await fetch(`/api/business/${currentBusinessId}/conversations/${currentConversationId}`, { method: 'DELETE' });
     currentConversationId = null;
     conversationTitle.textContent = 'Select a conversation';
@@ -227,16 +299,6 @@ loadMoreBtn.onclick = () => {
     loadConversations(conversationsPage, searchTerm);
 };
 
-// Format message (markdown, images, links)
-function formatMessage(msg) {
-    let formatted = msg.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    formatted = formatted.replace(/_([^_]+)_/g, '<em>$1</em>');
-    formatted = formatted.replace(/\n/g, '<br>');
-    formatted = formatted.replace(/(https?:\/\/[^\s<>]+\.(jpg|jpeg|png|gif|webp))(<br>|\s|$)/gi, (m, url, ext, sep) => `<div class='my-2'><img src='${url}' style='max-width:300px;border-radius:8px;'/></div>${sep||''}`);
-    formatted = formatted.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank">$1</a>');
-    return formatted;
-}
 // Time ago helper
 function timeAgo(date) {
     const now = new Date();
@@ -309,6 +371,50 @@ widgetForm.onsubmit = async function(e) {
     }
 };
 
+async function loadAISettings() {
+    if (!currentBusinessId) return;
+    const res = await fetch(`/api/business/${currentBusinessId}/ai-settings`);
+    const data = await res.json();
+    if (data.settings) {
+        chatbaseApiKey.value = data.settings.chatbase_api_key || '';
+        chatbaseAgentId.value = data.settings.chatbase_agent_id || '';
+        if (n8nWebhookUrl) n8nWebhookUrl.value = data.settings.n8n_webhook_url || '';
+        if (n8nSystemPrompt) n8nSystemPrompt.value = data.settings.n8n_system_prompt || '';
+    }
+}
+
+// Handle AI settings form submission
+if (aiSettingsForm) {
+    aiSettingsForm.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        if (!currentBusinessId) return;
+        const formData = {
+            chatbase_api_key: chatbaseApiKey.value,
+            chatbase_agent_id: chatbaseAgentId.value,
+            n8n_webhook_url: n8nWebhookUrl ? n8nWebhookUrl.value : '',
+            n8n_system_prompt: n8nSystemPrompt ? n8nSystemPrompt.value : ''
+        };
+        try {
+            const response = await fetch(`/api/business/${currentBusinessId}/ai-settings`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(formData)
+            });
+            const data = await response.json();
+            if (data.success) {
+                showAlert('AI settings saved successfully!', 'success');
+            } else {
+                showAlert('Failed to save AI settings. Please try again.', 'danger');
+            }
+        } catch (error) {
+            console.error('Error saving AI settings:', error);
+            showAlert('An error occurred while saving AI settings.', 'danger');
+        }
+    });
+}
+
 // On initial load
 loadConversations();
 
@@ -335,4 +441,21 @@ socket.on('update conversation', data => {
 socket.on('delete conversation', data => {
     if (data.businessId !== currentBusinessId) return;
     loadConversations();
-}); 
+});
+
+function showAlert(message, type = 'info') {
+    let oldAlert = document.getElementById('dashboard-alert');
+    if (oldAlert) oldAlert.remove();
+    const alert = document.createElement('div');
+    alert.id = 'dashboard-alert';
+    alert.className = `alert alert-${type}`;
+    alert.style.position = 'fixed';
+    alert.style.top = '20px';
+    alert.style.right = '20px';
+    alert.style.zIndex = 9999;
+    alert.innerText = message;
+    document.body.appendChild(alert);
+    setTimeout(() => {
+        alert.remove();
+    }, 3000);
+} 

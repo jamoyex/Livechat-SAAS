@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><%= business.name %> Live Chat</title>
+    <title><%= business.name %> Chat</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400&display=swap" rel="stylesheet">
@@ -72,7 +72,6 @@
         .chat-header h1 {
             font-size: 1.25rem;
             color: #000;
-            margin-left: 60px;
         }
         .header-menu-button {
             background: none;
@@ -231,6 +230,30 @@
         }
         .scroll-down-button.visible { opacity: 1; visibility: visible; transform: translateY(0); }
         .scroll-down-button i { font-size: 0.9rem; }
+        .typing-indicator {
+            display: inline-flex;
+            align-items: center;
+            height: 18px;
+            gap: 3px;
+        }
+        .typing-indicator .dot {
+            width: 7px;
+            height: 7px;
+            background: #bbb;
+            border-radius: 50%;
+            display: inline-block;
+            animation: typing-bounce 1.2s infinite both;
+        }
+        .typing-indicator .dot:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+        .typing-indicator .dot:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+        @keyframes typing-bounce {
+            0%, 80%, 100% { transform: scale(0.7); opacity: 0.7; }
+            40% { transform: scale(1); opacity: 1; }
+        }
     </style>
 </head>
 <body>
@@ -264,17 +287,12 @@
             <% } else { %>
                 <div class="message-container bot-message-container">
                     <div class="message bot-message" style="background-color: #fff; color: #222; border-bottom-left-radius: 5px; text-align: left; margin-right: auto;">
-                        <div>Hello! I'm Sarla, your friendly bot assistant.</div>
+                        <div>Hello! I'm <%= business.name %> AI! 👋</div>
                     </div>
                 </div>
                 <div class="message-container bot-message-container">
                     <div class="message bot-message" style="background-color: #fff; color: #222; border-bottom-left-radius: 5px; text-align: left; margin-right: auto;">
-                        <div><img src="https://chatbots.hellomarky.com/sarlawaving.png" alt="Chat Image" style="max-width: 150px; max-height: 150px; border-radius: 10px; margin-top: 5px;"></div>
-                    </div>
-                </div>
-                <div class="message-container bot-message-container">
-                    <div class="message bot-message" style="background-color: #fff; color: #222; border-bottom-left-radius: 5px; text-align: left; margin-right: auto;">
-                        <div>I'm here to help with any question you have!</div>
+                        <div>I'm here to help with any question you have! ☺️</div>
                     </div>
                 </div>
             <% } %>
@@ -352,15 +370,55 @@
             if (quickReplies) quickReplies.classList.add('hidden');
             socket.emit('visitor message', { content: msg, businessId: '<%= business.id %>', visitorId: '<%= visitorId %>' });
         }
+        let conversationStatus = 'active';
         socket.on('chat message', function(data) {
+            if (data.status) conversationStatus = data.status;
             appendMessage(data.sender_type, data.content);
+            if (data.sender_type === 'user' && conversationStatus === 'active') {
+                appendTypingIndicator();
+            }
+            if (data.sender_type === 'bot' || conversationStatus !== 'active') {
+                removeTypingIndicator();
+            }
         });
+        function formatMessageContent(text) {
+            if (typeof text !== 'string') return text;
+            // 1. Basic HTML escaping
+            let escapedText = text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            // 2. Markdown Bold (**text**)
+            escapedText = escapedText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            // 3. Markdown Italics (_text_)
+            escapedText = escapedText.replace(/_([^_]+)_/g, '<em>$1</em>');
+            // 4. Unordered Lists (lines starting with * or -)
+            escapedText = escapedText.replace(/^\*\s+/gm, '&bull; ').replace(/^-\s+/gm, '&bull; ');
+            // 5. Ordered Lists (lines starting with 1., 2., etc.)
+            escapedText = escapedText.replace(/^(\d+)\.\s+/gm, '$1. ');
+            // 6. Markdown Images ![alt](url)
+            escapedText = escapedText.replace(/!\[([^\]]*)\]\((.*?)\)/g, '<img src="$2" alt="$1" style="max-width:250px;max-height:250px;border-radius:10px;margin-top:5px;">');
+            // 7. Markdown Links [text](url)
+            escapedText = escapedText.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" style="color: #007bff; text-decoration: underline;">$1</a>');
+            // 8. Plain image URLs (jpg, jpeg, png, gif, webp)
+            escapedText = escapedText.replace(/(https?:\/\/[^\s<>"']+\.(?:jpg|jpeg|png|gif|webp))/gi, url =>
+                `<img src="${url}" alt="Image" style="max-width:250px;max-height:250px;border-radius:10px;margin-top:5px;">`
+            );
+            // 9. Plain non-image URLs (not already inside an <a> or <img>)
+            escapedText = escapedText.replace(/(https?:\/\/[^\s<>"']+)/gi, url => {
+                // If already replaced as image, skip
+                if (/\.(jpg|jpeg|png|gif|webp)$/i.test(url)) return url;
+                // If already inside an anchor tag, skip
+                if (escapedText.includes(`href=\"${url}\"`)) return url;
+                return `<a href="${url}" target="_blank" style="color: #007bff; text-decoration: underline;">${url}</a>`;
+            });
+            // 10. Newlines to <br>
+            escapedText = escapedText.replace(/\n/g, '<br>');
+            return escapedText;
+        }
         function appendMessage(sender_type, content) {
             const container = document.createElement('div');
             container.className = 'message-container ' + (sender_type === 'user' ? 'user-message-container' : 'bot-message-container');
             const div = document.createElement('div');
             div.className = 'message ' + (sender_type === 'user' ? 'user-message' : 'bot-message');
-            div.textContent = content;
+            div.innerHTML = formatMessageContent(content);
             if (sender_type === 'user') {
                 div.style.backgroundColor = VISITOR_MESSAGE_COLOR;
                 div.style.color = '#fff';
@@ -384,6 +442,48 @@
             chatBody.appendChild(container);
             chatBody.scrollTop = chatBody.scrollHeight;
         }
+        function appendTypingIndicator() {
+            removeTypingIndicator();
+            const container = document.createElement('div');
+            container.className = 'message-container bot-message-container typing-indicator-container';
+            const div = document.createElement('div');
+            div.className = 'message bot-message';
+            div.style.backgroundColor = '#fff';
+            div.style.color = '#222';
+            div.style.borderBottomLeftRadius = '5px';
+            div.style.textAlign = 'left';
+            div.style.marginRight = 'auto';
+            div.style.minWidth = '48px';
+            div.innerHTML = `<span class="typing-indicator">
+                <span class="dot"></span>
+                <span class="dot"></span>
+                <span class="dot"></span>
+            </span>`;
+            container.appendChild(div);
+            // Insert after the last user message, before any following bot/agent messages
+            const allMessages = chatBody.querySelectorAll('.message-container');
+            let lastUserMsg = null;
+            for (let i = allMessages.length - 1; i >= 0; i--) {
+                if (allMessages[i].classList.contains('user-message-container')) {
+                    lastUserMsg = allMessages[i];
+                    break;
+                }
+            }
+            if (lastUserMsg) {
+                if (lastUserMsg.nextSibling) {
+                    chatBody.insertBefore(container, lastUserMsg.nextSibling);
+                } else {
+                    chatBody.appendChild(container);
+                }
+            } else {
+                chatBody.appendChild(container);
+            }
+            chatBody.scrollTop = chatBody.scrollHeight;
+        }
+        function removeTypingIndicator() {
+            const indicator = chatBody.querySelector('.typing-indicator-container');
+            if (indicator) indicator.remove();
+        }
         // Scroll down button logic
         chatBody.addEventListener('scroll', () => {
             const threshold = 200;
@@ -398,6 +498,16 @@
         });
         scrollDownButton.addEventListener('click', () => {
             chatBody.scrollTo({ top: chatBody.scrollHeight, behavior: 'smooth' });
+        });
+        // On page load, format all static messages
+        document.addEventListener('DOMContentLoaded', function() {
+            document.querySelectorAll('.message').forEach(function(div) {
+                // Only format if not already formatted (avoid double-formatting)
+                if (!div.dataset.formatted) {
+                    div.innerHTML = formatMessageContent(div.textContent);
+                    div.dataset.formatted = 'true';
+                }
+            });
         });
     </script>
 </body>

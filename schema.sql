@@ -20,6 +20,10 @@ CREATE TABLE IF NOT EXISTS businesses (
     widget_h1_color VARCHAR(32),
     widget_button_color VARCHAR(32),
     widget_visitor_message_color VARCHAR(32),
+    chatbase_api_key VARCHAR(255),
+    chatbase_agent_id VARCHAR(255),
+    n8n_webhook_url VARCHAR(255),
+    n8n_system_prompt TEXT;
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (owner_user_id) REFERENCES users(id),
     INDEX idx_owner (owner_user_id)

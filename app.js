@@ -254,7 +254,8 @@ io.on('connection', (socket) => {
         let businessId = socket.data.businessId || data.businessId;
         let visitorId = socket.data.visitorId || data.visitorId;
         let isNewConversation = false;
-        if (!businessId || !visitorId) return;
+        let business = null;
+        let conversationStatus = null;
         try {
             // If no conversation, create it now
             if (!conversationId) {
@@ -277,20 +278,69 @@ io.on('connection', (socket) => {
                 socket.data.visitorId = visitorId;
                 socket.join('conv_' + conversationId);
             }
+            // Fetch conversation status
+            const [convStatusRows] = await pool.execute('SELECT status FROM conversations WHERE id = ?', [conversationId]);
+            if (convStatusRows.length > 0) conversationStatus = convStatusRows[0].status;
             await pool.execute(
                 'INSERT INTO messages (conversation_id, content, sender_type, is_read, created_at) VALUES (?, ?, ?, ?, NOW())',
                 [conversationId, content, 'user', 0]
             );
+            await pool.execute(
+                'UPDATE conversations SET last_message_at = NOW() WHERE id = ?',
+                [conversationId]
+            );
+            // Fetch business settings for AI
+            const [bizRows] = await pool.execute('SELECT * FROM businesses WHERE id = ?', [businessId]);
+            if (bizRows.length > 0) business = bizRows[0];
         } catch (err) {
             console.error('Error in visitor message:', err);
         }
         // Broadcast to all in the conversation (including admins/agents)
-        io.to('conv_' + conversationId).emit('chat message', { sender_type: 'user', conversationId, content });
+        io.to('conv_' + conversationId).emit('chat message', { sender_type: 'user', conversationId, content, status: conversationStatus });
         // Emit to business room for new or updated conversation
         if (isNewConversation) {
             io.to('business_' + businessId).emit('new conversation', { businessId, conversationId });
         } else {
             io.to('business_' + businessId).emit('update conversation', { businessId, conversationId });
+        }
+        // AI Agent via N8N webhook (only if status is active)
+        if (business && business.n8n_webhook_url && conversationStatus === 'active') {
+            try {
+                const n8nPayload = {
+                    message: content,
+                    system_prompt: business.n8n_system_prompt || '',
+                    session_id: visitorId
+                };
+                const n8nRes = await fetch(business.n8n_webhook_url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(n8nPayload)
+                });
+                if (n8nRes.ok) {
+                    let aiReply = await n8nRes.text();
+                    try {
+                        const parsed = JSON.parse(aiReply);
+                        if (parsed && typeof parsed === 'object' && parsed.output) {
+                            aiReply = parsed.output;
+                        }
+                    } catch (e) {
+                        // Not JSON, use as is
+                    }
+                    if (aiReply && aiReply.trim().length > 0) {
+                        await pool.execute(
+                            'INSERT INTO messages (conversation_id, content, sender_type, is_read, created_at) VALUES (?, ?, ?, ?, NOW())',
+                            [conversationId, aiReply, 'bot', 0]
+                        );
+                        await pool.execute(
+                            'UPDATE conversations SET last_message_at = NOW() WHERE id = ?',
+                            [conversationId]
+                        );
+                        io.to('conv_' + conversationId).emit('chat message', { sender_type: 'bot', conversationId, content: aiReply, status: conversationStatus });
+                    }
+                }
+            } catch (err) {
+                console.error('Error calling N8N webhook:', err);
+            }
         }
     });
     // Admin/agent sends a message
@@ -298,15 +348,24 @@ io.on('connection', (socket) => {
         const { businessId, conversationId, content } = data;
         if (!conversationId) return;
         try {
+            // Only allow admin/agent to reply if status is handled
+            const [convStatusRows] = await pool.execute('SELECT status FROM conversations WHERE id = ?', [conversationId]);
+            if (convStatusRows.length === 0 || convStatusRows[0].status !== 'handled') {
+                return; // Do not allow reply if not handled
+            }
             await pool.execute(
                 'INSERT INTO messages (conversation_id, content, sender_type, is_read, created_at) VALUES (?, ?, ?, ?, NOW())',
                 [conversationId, content, 'agent', 0]
+            );
+            await pool.execute(
+                'UPDATE conversations SET last_message_at = NOW() WHERE id = ?',
+                [conversationId]
             );
         } catch (err) {
             console.error('Error in admin message:', err);
         }
         // Broadcast to all in the conversation (including visitor)
-        io.to('conv_' + conversationId).emit('chat message', { sender_type: 'agent', conversationId, content });
+        io.to('conv_' + conversationId).emit('chat message', { sender_type: 'agent', conversationId, content, status: 'handled' });
         // Emit to business room for updated conversation
         io.to('business_' + businessId).emit('update conversation', { businessId, conversationId });
     });
@@ -720,6 +779,11 @@ app.post('/api/business/:id/conversations/:conversationId/takeover', requireLogi
         if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
         // Update conversation status
         await pool.execute('UPDATE conversations SET status = ? WHERE id = ? AND business_id = ?', ['handled', conversationId, businessId]);
+        // Insert bot message
+        await pool.execute('INSERT INTO messages (conversation_id, content, sender_type, is_read, created_at) VALUES (?, ?, ?, ?, NOW())', [conversationId, 'A human agent took over this conversation', 'bot', 0]);
+        await pool.execute('UPDATE conversations SET last_message_at = NOW() WHERE id = ?', [conversationId]);
+        // Emit bot message to conversation
+        io.to('conv_' + conversationId).emit('chat message', { sender_type: 'bot', conversationId, content: 'A human agent took over this conversation', status: 'handled' });
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: 'Server error' });
@@ -736,6 +800,11 @@ app.post('/api/business/:id/conversations/:conversationId/let-bot-handle', requi
         if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
         // Update conversation status
         await pool.execute('UPDATE conversations SET status = ? WHERE id = ? AND business_id = ?', ['active', conversationId, businessId]);
+        // Insert bot message
+        await pool.execute('INSERT INTO messages (conversation_id, content, sender_type, is_read, created_at) VALUES (?, ?, ?, ?, NOW())', [conversationId, 'The AI assistant is now handling this conversation.', 'bot', 0]);
+        await pool.execute('UPDATE conversations SET last_message_at = NOW() WHERE id = ?', [conversationId]);
+        // Emit bot message to conversation
+        io.to('conv_' + conversationId).emit('chat message', { sender_type: 'bot', conversationId, content: 'The AI assistant is now handling this conversation.', status: 'active' });
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: 'Server error' });
@@ -910,6 +979,70 @@ app.use('/api', apiLimiter);
 
 // Apply widget limiter to widget routes
 app.use('/widget', widgetLimiter);
+
+// Ensure JSON body parsing for API endpoints
+app.use(express.json());
+
+// API endpoint to get AI settings
+app.get('/api/business/:businessId/ai-settings', requireLogin, async (req, res) => {
+    const businessId = parseInt(req.params.businessId);
+    const userId = req.session.userId;
+
+    try {
+        // Check if user has access to this business
+        const [business] = await pool.execute(
+            'SELECT * FROM businesses WHERE id = ? AND (owner_user_id = ? OR id IN (SELECT business_id FROM business_users WHERE user_id = ?))',
+            [businessId, userId, userId]
+        );
+
+        if (business.length === 0) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+
+        res.json({
+            success: true,
+            settings: {
+                chatbase_api_key: business[0].chatbase_api_key,
+                chatbase_agent_id: business[0].chatbase_agent_id,
+                n8n_webhook_url: business[0].n8n_webhook_url,
+                n8n_system_prompt: business[0].n8n_system_prompt
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching AI settings:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// API endpoint to update AI settings
+app.post('/api/business/:businessId/ai-settings', requireLogin, async (req, res) => {
+    const businessId = parseInt(req.params.businessId);
+    const userId = req.session.userId;
+    const { chatbase_api_key, chatbase_agent_id, n8n_webhook_url, n8n_system_prompt } = req.body;
+
+    try {
+        // Check if user has access to this business
+        const [business] = await pool.execute(
+            'SELECT * FROM businesses WHERE id = ? AND (owner_user_id = ? OR id IN (SELECT business_id FROM business_users WHERE user_id = ? AND role = "admin"))',
+            [businessId, userId, userId]
+        );
+
+        if (business.length === 0) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+
+        // Update AI settings
+        await pool.execute(
+            'UPDATE businesses SET chatbase_api_key = ?, chatbase_agent_id = ?, n8n_webhook_url = ?, n8n_system_prompt = ? WHERE id = ?',
+            [chatbase_api_key, chatbase_agent_id, n8n_webhook_url, n8n_system_prompt, businessId]
+        );
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error updating AI settings:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
 
 // Start server
 const PORT = process.env.PORT || 3001;
