@@ -4,7 +4,6 @@ console.log('DB_HOST:', process.env.DB_HOST);
 const express = require('express');
 const path = require('path');
 const session = require('express-session');
-const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -12,6 +11,7 @@ const cookieParser = require('cookie-parser');
 const { v4: uuidv4 } = require('uuid');
 const zlib = require('zlib');
 const rateLimit = require('express-rate-limit');
+const pool = require('./config/database');  // Import PostgreSQL pool
 const app = express();
 
 // Set up view engine
@@ -26,26 +26,16 @@ app.use(express.urlencoded({ extended: true }));
 
 // Set up session
 app.use(session({
-    secret: process.env.SESSION_SECRET,
+    secret: '74af78eb4ba55859550fead595585a9b92735347e6d615ce6c6e327ecaf597fa',
     resave: false,
-    saveUninitialized: true
+    saveUninitialized: false,
+    cookie: {
+        secure: false, // set to true if using https
+        maxAge: 24 * 60 * 60 * 1000 // 24 hours
+    }
 }));
 
 app.use(cookieParser());
-
-// Update this with your actual DB credentials or use dotenv
-const dbConfig = {
-    host: process.env.DB_HOST,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASS,
-    database: process.env.DB_NAME,
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0
-};
-
-// Create connection pool
-const pool = mysql.createPool(dbConfig);
 
 // Create HTTP server and Socket.IO instance
 const server = http.createServer(app);
@@ -114,8 +104,8 @@ async function getBusinessSettings(businessId) {
     }
 
     try {
-        const [rows] = await pool.execute(
-            'SELECT * FROM businesses WHERE id = ?',
+        const { rows } = await pool.query(
+            'SELECT * FROM businesses WHERE id = $1',
             [businessId]
         );
         if (rows.length > 0) {
@@ -146,12 +136,12 @@ setInterval(() => {
 async function getPaginatedMessages(conversationId, page = 1, limit = MESSAGE_BATCH_SIZE) {
     const offset = (page - 1) * limit;
     try {
-        const [messages] = await pool.execute(
+        const { rows: messages } = await pool.query(
             `SELECT id, conversation_id, content, sender_type, is_read, created_at 
              FROM messages 
-             WHERE conversation_id = ? 
+             WHERE conversation_id = $1 
              ORDER BY created_at DESC 
-             LIMIT ? OFFSET ?`,
+             LIMIT $2 OFFSET $3`,
             [conversationId, limit, offset]
         );
         
@@ -170,12 +160,12 @@ io.on('connection', (socket) => {
     socket.on('visitor join', async ({ businessId, visitorId }) => {
         let conversationId;
         try {
-            const [convRows] = await pool.execute(
-                'SELECT * FROM conversations WHERE business_id = ? AND visitor_name = ?',
+            const { rows } = await pool.query(
+                'SELECT * FROM conversations WHERE business_id = $1 AND visitor_name = $2',
                 [businessId, visitorId]
             );
-            if (convRows.length > 0) {
-                conversationId = convRows[0].id;
+            if (rows.length > 0) {
+                conversationId = rows[0].id;
                 socket.data.conversationId = conversationId;
                 socket.data.businessId = businessId;
                 socket.data.visitorId = visitorId;
@@ -190,17 +180,17 @@ io.on('connection', (socket) => {
     socket.on('close conversation', async ({ businessId, visitorId }) => {
         try {
             // Find and close the current conversation
-            const [convRows] = await pool.execute(
-                'SELECT * FROM conversations WHERE business_id = ? AND visitor_name = ? AND status = "active"',
-                [businessId, visitorId]
+            const { rows } = await pool.query(
+                'SELECT * FROM conversations WHERE business_id = $1 AND visitor_name = $2 AND status = $3',
+                [businessId, visitorId, 'active']
             );
             
-            if (convRows.length > 0) {
-                const conversationId = convRows[0].id;
+            if (rows.length > 0) {
+                const conversationId = rows[0].id;
                 // Update conversation status to closed
-                await pool.execute(
-                    'UPDATE conversations SET status = "closed" WHERE id = ?',
-                    [conversationId]
+                await pool.query(
+                    'UPDATE conversations SET status = $1 WHERE id = $2',
+                    ['closed', conversationId]
                 );
                 
                 // Leave the conversation room
@@ -259,18 +249,18 @@ io.on('connection', (socket) => {
         try {
             // If no conversation, create it now
             if (!conversationId) {
-                const [convRows] = await pool.execute(
-                    'SELECT * FROM conversations WHERE business_id = ? AND visitor_name = ?',
+                const { rows } = await pool.query(
+                    'SELECT * FROM conversations WHERE business_id = $1 AND visitor_name = $2',
                     [businessId, visitorId]
                 );
-                if (convRows.length > 0) {
-                    conversationId = convRows[0].id;
+                if (rows.length > 0) {
+                    conversationId = rows[0].id;
                 } else {
-                    const [result] = await pool.execute(
-                        'INSERT INTO conversations (business_id, visitor_name, status) VALUES (?, ?, ?)',
+                    const { rows: result } = await pool.query(
+                        'INSERT INTO conversations (business_id, visitor_name, status) VALUES ($1, $2, $3) RETURNING id',
                         [businessId, visitorId, 'active']
                     );
-                    conversationId = result.insertId;
+                    conversationId = result[0].id;
                     isNewConversation = true;
                 }
                 socket.data.conversationId = conversationId;
@@ -279,18 +269,24 @@ io.on('connection', (socket) => {
                 socket.join('conv_' + conversationId);
             }
             // Fetch conversation status
-            const [convStatusRows] = await pool.execute('SELECT status FROM conversations WHERE id = ?', [conversationId]);
-            if (convStatusRows.length > 0) conversationStatus = convStatusRows[0].status;
-            await pool.execute(
-                'INSERT INTO messages (conversation_id, content, sender_type, is_read, created_at) VALUES (?, ?, ?, ?, NOW())',
-                [conversationId, content, 'user', 0]
+            const { rows: convStatusRows } = await pool.query(
+                'SELECT status FROM conversations WHERE id = $1',
+                [conversationId]
             );
-            await pool.execute(
-                'UPDATE conversations SET last_message_at = NOW() WHERE id = ?',
+            if (convStatusRows.length > 0) conversationStatus = convStatusRows[0].status;
+            await pool.query(
+                'INSERT INTO messages (conversation_id, content, sender_type, is_read, created_at) VALUES ($1, $2, $3, $4, NOW())',
+                [conversationId, content, 'user', false]
+            );
+            await pool.query(
+                'UPDATE conversations SET last_message_at = NOW() WHERE id = $1',
                 [conversationId]
             );
             // Fetch business settings for AI
-            const [bizRows] = await pool.execute('SELECT * FROM businesses WHERE id = ?', [businessId]);
+            const { rows: bizRows } = await pool.query(
+                'SELECT * FROM businesses WHERE id = $1',
+                [businessId]
+            );
             if (bizRows.length > 0) business = bizRows[0];
         } catch (err) {
             console.error('Error in visitor message:', err);
@@ -328,12 +324,12 @@ io.on('connection', (socket) => {
                         // Not JSON, use as is
                     }
                     if (aiReply && aiReply.trim().length > 0) {
-                        await pool.execute(
-                            'INSERT INTO messages (conversation_id, content, sender_type, is_read, created_at) VALUES (?, ?, ?, ?, NOW())',
-                            [conversationId, aiReply, 'bot', 0]
+                        await pool.query(
+                            'INSERT INTO messages (conversation_id, content, sender_type, is_read, created_at) VALUES ($1, $2, $3, $4, NOW())',
+                            [conversationId, aiReply, 'bot', false]
                         );
-                        await pool.execute(
-                            'UPDATE conversations SET last_message_at = NOW() WHERE id = ?',
+                        await pool.query(
+                            'UPDATE conversations SET last_message_at = NOW() WHERE id = $1',
                             [conversationId]
                         );
                         io.to('conv_' + conversationId).emit('chat message', { sender_type: 'bot', conversationId, content: aiReply, status: conversationStatus });
@@ -350,16 +346,19 @@ io.on('connection', (socket) => {
         if (!conversationId) return;
         try {
             // Only allow admin/agent to reply if status is handled
-            const [convStatusRows] = await pool.execute('SELECT status FROM conversations WHERE id = ?', [conversationId]);
+            const { rows: convStatusRows } = await pool.query(
+                'SELECT status FROM conversations WHERE id = $1',
+                [conversationId]
+            );
             if (convStatusRows.length === 0 || convStatusRows[0].status !== 'handled') {
                 return; // Do not allow reply if not handled
             }
-            await pool.execute(
-                'INSERT INTO messages (conversation_id, content, sender_type, is_read, created_at) VALUES (?, ?, ?, ?, NOW())',
-                [conversationId, content, 'agent', 0]
+            await pool.query(
+                'INSERT INTO messages (conversation_id, content, sender_type, is_read, created_at) VALUES ($1, $2, $3, $4, NOW())',
+                [conversationId, content, 'agent', false]
             );
-            await pool.execute(
-                'UPDATE conversations SET last_message_at = NOW() WHERE id = ?',
+            await pool.query(
+                'UPDATE conversations SET last_message_at = NOW() WHERE id = $1',
                 [conversationId]
             );
         } catch (err) {
@@ -389,33 +388,41 @@ app.get('/register', (req, res) => {
 app.post('/register', authLimiter, async (req, res) => {
     const { email, password, name } = req.body;
     let error;
+    console.log('Register attempt:', { email, name });
     if (!email || !password || !name) {
         error = 'All fields are required.';
+        console.log('Registration error: missing fields');
         return res.render('register', { error });
     }
     try {
         // Check if email already exists
-        const [rows] = await pool.execute('SELECT id FROM users WHERE email = ?', [email]);
+        const { rows } = await pool.query(
+            'SELECT id FROM users WHERE email = $1',
+            [email]
+        );
         if (rows.length > 0) {
             error = 'Email already exists.';
+            console.log('Registration error: email exists');
             return res.render('register', { error });
         }
         // Hash password
         const hashedPassword = await bcrypt.hash(password, 10);
         // Insert new user
-        const [result] = await pool.execute(
-            'INSERT INTO users (email, password, name) VALUES (?, ?, ?)',
+        const { rows: result } = await pool.query(
+            'INSERT INTO users (email, password, name) VALUES ($1, $2, $3) RETURNING id',
             [email, hashedPassword, name]
         );
         // Get the new user ID
-        const userId = result.insertId;
+        const userId = result[0].id;
         // Auto-login: set session
         req.session.userId = userId;
         req.session.userName = name;
+        console.log('Registration success:', { userId, email });
         // Redirect to dashboard
         return res.redirect('/dashboard');
     } catch (err) {
         error = 'Registration failed. Please try again.';
+        console.error('Registration error:', err);
         return res.render('register', { error });
     }
 });
@@ -429,7 +436,10 @@ app.post('/login', authLimiter, async (req, res) => {
         return res.render('login', { error });
     }
     try {
-        const [rows] = await pool.execute('SELECT * FROM users WHERE email = ?', [email]);
+        const { rows } = await pool.query(
+            'SELECT * FROM users WHERE email = $1',
+            [email]
+        );
         if (rows.length === 0) {
             error = 'Invalid email or password.';
             return res.render('login', { error });
@@ -463,13 +473,11 @@ app.get('/dashboard', requireLogin, async (req, res) => {
     const userId = req.session.userId;
     let businesses = [];
     try {
-        const [owned] = await pool.execute(
-            'SELECT * FROM businesses WHERE owner_user_id = ?', [userId]
+        const { rows: owned } = await pool.query(
+            'SELECT * FROM businesses WHERE owner_user_id = $1', [userId]
         );
-        const [member] = await pool.execute(
-            `SELECT b.* FROM businesses b
-             JOIN business_users bu ON bu.business_id = b.id
-             WHERE bu.user_id = ?`, [userId]
+        const { rows: member } = await pool.query(
+            'SELECT b.* FROM businesses b JOIN business_users bu ON bu.business_id = b.id WHERE bu.user_id = $1', [userId]
         );
         businesses = [...owned];
         member.forEach(mb => {
@@ -503,13 +511,11 @@ app.get('/dashboard/:businessId', requireLogin, async (req, res) => {
     let businesses = [];
     let selectedBusiness = null;
     try {
-        const [owned] = await pool.execute(
-            'SELECT * FROM businesses WHERE owner_user_id = ?', [userId]
+        const { rows: owned } = await pool.query(
+            'SELECT * FROM businesses WHERE owner_user_id = $1', [userId]
         );
-        const [member] = await pool.execute(
-            `SELECT b.* FROM businesses b
-             JOIN business_users bu ON bu.business_id = b.id
-             WHERE bu.user_id = ?`, [userId]
+        const { rows: member } = await pool.query(
+            'SELECT b.* FROM businesses b JOIN business_users bu ON bu.business_id = b.id WHERE bu.user_id = $1', [userId]
         );
         businesses = [...owned];
         member.forEach(mb => {
@@ -538,29 +544,18 @@ app.post('/business/add', requireLogin, async (req, res) => {
         return res.redirect('/dashboard');
     }
     try {
-        const connection = await pool.getConnection();
-        try {
-            await connection.beginTransaction();
-            // Insert business with widget settings
-            const [result] = await connection.execute(
-                'INSERT INTO businesses (name, owner_user_id, widget_header_color, widget_h1_color, widget_button_color, widget_visitor_message_color, widget_quick_replies) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                [name, userId, widget_header_color, widget_h1_color, widget_button_color, widget_visitor_message_color, widget_quick_replies]
-            );
-            const businessId = result.insertId;
-            // Add user as admin in business_users
-            await connection.execute(
-                'INSERT INTO business_users (business_id, user_id, role) VALUES (?, ?, ?)',
-                [businessId, userId, 'admin']
-            );
-            await connection.commit();
-            // Redirect to the new dashboard URL
-            return res.redirect(`/dashboard/${businessId}`);
-        } catch (err) {
-            await connection.rollback();
-            throw err;
-        } finally {
-            connection.release();
-        }
+        const { rows: result } = await pool.query(
+            'INSERT INTO businesses (name, owner_user_id, widget_header_color, widget_h1_color, widget_button_color, widget_visitor_message_color, widget_quick_replies) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',
+            [name, userId, widget_header_color, widget_h1_color, widget_button_color, widget_visitor_message_color, widget_quick_replies]
+        );
+        const businessId = result[0].id;
+        // Add user as admin in business_users
+        await pool.query(
+            'INSERT INTO business_users (business_id, user_id, role) VALUES ($1, $2, $3)',
+            [businessId, userId, 'admin']
+        );
+        // Redirect to the new dashboard URL
+        return res.redirect(`/dashboard/${businessId}`);
     } catch (err) {
         return res.redirect('/dashboard');
     }
@@ -587,7 +582,10 @@ app.get('/widget/:businessId', widgetLimiter, async (req, res) => {
     let widgetHeaderName, widgetHeaderColor, widgetQuickReplies;
     let widgetH1Color, widgetButtonColor, widgetVisitorMessageColor;
     try {
-        const [bizRows] = await pool.execute('SELECT * FROM businesses WHERE id = ?', [businessId]);
+        const { rows: bizRows } = await pool.query(
+            'SELECT * FROM businesses WHERE id = $1',
+            [businessId]
+        );
         if (bizRows.length === 0) {
             return res.status(404).send('Business not found');
         }
@@ -603,16 +601,16 @@ app.get('/widget/:businessId', widgetLimiter, async (req, res) => {
                 res.cookie('visitorId', visitorId, { maxAge: 1000 * 60 * 60 * 24 * 30 }); // 30 days
             }
             // Find conversation for this visitor
-            const [convRows] = await pool.execute(
-                'SELECT * FROM conversations WHERE business_id = ? AND visitor_name = ?',
+            const { rows: convRows } = await pool.query(
+                'SELECT * FROM conversations WHERE business_id = $1 AND visitor_name = $2',
                 [businessId, visitorId]
             );
             let conversationId = null;
             if (convRows.length > 0) {
                 conversationId = convRows[0].id;
                 // Load messages
-                const [msgRows] = await pool.execute(
-                    'SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC',
+                const { rows: msgRows } = await pool.query(
+                    'SELECT * FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC',
                     [conversationId]
                 );
                 messages = msgRows;
@@ -653,42 +651,39 @@ app.get('/business/:businessId/chats/:conversationId', requireLogin, async (req,
     let conversation = null;
     let messages = [];
     try {
-        const connection = await pool.getConnection();
-        // Get business
-        const [bizRows] = await connection.execute('SELECT * FROM businesses WHERE id = ?', [businessId]);
+        const { rows: bizRows } = await pool.query(
+            'SELECT * FROM businesses WHERE id = $1',
+            [businessId]
+        );
         if (bizRows.length === 0) {
-            await connection.end();
             return res.status(404).send('Business not found');
         }
         business = bizRows[0];
         isOwner = business.owner_user_id === userId;
         // Check if user is a team member
-        const [memberRows] = await connection.execute(
-            'SELECT * FROM business_users WHERE business_id = ? AND user_id = ?',
+        const { rows: memberRows } = await pool.query(
+            'SELECT * FROM business_users WHERE business_id = $1 AND user_id = $2',
             [businessId, userId]
         );
         isMember = memberRows.length > 0;
         if (!isOwner && !isMember) {
-            await connection.end();
             return res.status(403).send('You do not have access to this business.');
         }
         // Get conversation
-        const [convRows] = await connection.execute(
-            'SELECT * FROM conversations WHERE id = ? AND business_id = ?',
+        const { rows: convRows } = await pool.query(
+            'SELECT * FROM conversations WHERE id = $1 AND business_id = $2',
             [conversationId, businessId]
         );
         if (convRows.length === 0) {
-            await connection.end();
             return res.status(404).send('Conversation not found');
         }
         conversation = convRows[0];
         // Get messages
-        const [msgRows] = await connection.execute(
-            'SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC',
+        const { rows: msgRows } = await pool.query(
+            'SELECT * FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC',
             [conversationId]
         );
         messages = msgRows;
-        await connection.end();
     } catch (err) {
         return res.status(500).send('Server error');
     }
@@ -697,10 +692,16 @@ app.get('/business/:businessId/chats/:conversationId', requireLogin, async (req,
 
 // Helper function to check if a user has access to a business
 async function checkBusinessAccess(businessId, userId) {
-    const [bizRows] = await pool.execute('SELECT * FROM businesses WHERE id = ?', [businessId]);
+    const { rows: bizRows } = await pool.query(
+        'SELECT * FROM businesses WHERE id = $1',
+        [businessId]
+    );
     if (bizRows.length === 0) return { error: 'Business not found' };
     const business = bizRows[0];
-    const [memberRows] = await pool.execute('SELECT * FROM business_users WHERE business_id = ? AND user_id = ?', [businessId, userId]);
+    const { rows: memberRows } = await pool.query(
+        'SELECT * FROM business_users WHERE business_id = $1 AND user_id = $2',
+        [businessId, userId]
+    );
     if (business.owner_user_id !== userId && memberRows.length === 0) return { error: 'Forbidden' };
     return { business };
 }
@@ -718,21 +719,25 @@ app.get('/api/business/:id/conversations', requireLogin, async (req, res) => {
         if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
         // Query conversations
         let query = `SELECT c.*, 
-            (SELECT content FROM messages WHERE conversation_id = c.id AND sender_type = 'user' ORDER BY created_at DESC LIMIT 1) as last_user_message,
-            (SELECT content FROM messages WHERE conversation_id = c.id AND sender_type IN ('agent','bot') ORDER BY created_at DESC LIMIT 1) as last_bot_message,
+            (SELECT content FROM messages WHERE conversation_id = c.id AND sender_type = $1 ORDER BY created_at DESC LIMIT 1) as last_user_message,
+            (SELECT content FROM messages WHERE conversation_id = c.id AND sender_type IN ($2, $3) ORDER BY created_at DESC LIMIT 1) as last_bot_message,
             (SELECT created_at FROM messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1) as last_message_time,
-            (SELECT COUNT(*) FROM messages WHERE conversation_id = c.id AND is_read = 0 AND sender_type = 'user') as unread_count
-            FROM conversations c WHERE c.business_id = ?`;
-        let params = [businessId];
+            (SELECT COUNT(*) FROM messages WHERE conversation_id = c.id AND is_read = false AND sender_type = $1) as unread_count
+            FROM conversations c WHERE c.business_id = $4`;
+        let params = ['user', 'agent', 'bot', businessId];
         if (search) {
-            query += ' AND (c.visitor_name LIKE ? OR c.visitor_email LIKE ?)';
+            query += ' AND (c.visitor_name ILIKE $5 OR c.visitor_email ILIKE $6)';
             params.push(search, search);
+            query += ' ORDER BY c.last_message_at DESC LIMIT $7 OFFSET $8';
+            params.push(limit, offset);
+        } else {
+            query += ' ORDER BY c.last_message_at DESC LIMIT $5 OFFSET $6';
+            params.push(limit, offset);
         }
-        query += ' ORDER BY c.last_message_at DESC LIMIT ? OFFSET ?';
-        params.push(limit, offset);
-        const [conversations] = await pool.execute(query, params);
+        const { rows: conversations } = await pool.query(query, params);
         res.json({ conversations });
     } catch (err) {
+        console.error('Error fetching conversations:', err);
         res.status(500).json({ error: 'Server error' });
     }
 });
@@ -746,7 +751,10 @@ app.get('/api/business/:id/conversations/:conversationId', requireLogin, async (
         const { error, business } = await checkBusinessAccess(businessId, userId);
         if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
         // Get conversation
-        const [convRows] = await pool.execute('SELECT * FROM conversations WHERE id = ? AND business_id = ?', [conversationId, businessId]);
+        const { rows: convRows } = await pool.query(
+            'SELECT * FROM conversations WHERE id = $1 AND business_id = $2',
+            [conversationId, businessId]
+        );
         if (convRows.length === 0) return res.status(404).json({ error: 'Conversation not found' });
         res.json({ conversation: convRows[0] });
     } catch (err) {
@@ -763,7 +771,10 @@ app.get('/api/business/:id/conversations/:conversationId/messages', requireLogin
         const { error, business } = await checkBusinessAccess(businessId, userId);
         if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
         // Get messages
-        const [msgRows] = await pool.execute('SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC', [conversationId]);
+        const { rows: msgRows } = await pool.query(
+            'SELECT * FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC',
+            [conversationId]
+        );
         res.json({ messages: msgRows });
     } catch (err) {
         res.status(500).json({ error: 'Server error' });
@@ -779,10 +790,19 @@ app.post('/api/business/:id/conversations/:conversationId/takeover', requireLogi
         const { error, business } = await checkBusinessAccess(businessId, userId);
         if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
         // Update conversation status
-        await pool.execute('UPDATE conversations SET status = ? WHERE id = ? AND business_id = ?', ['handled', conversationId, businessId]);
+        await pool.query(
+            'UPDATE conversations SET status = $1 WHERE id = $2 AND business_id = $3',
+            ['handled', conversationId, businessId]
+        );
         // Insert bot message
-        await pool.execute('INSERT INTO messages (conversation_id, content, sender_type, is_read, created_at) VALUES (?, ?, ?, ?, NOW())', [conversationId, 'A human agent took over this conversation', 'bot', 0]);
-        await pool.execute('UPDATE conversations SET last_message_at = NOW() WHERE id = ?', [conversationId]);
+        await pool.query(
+            'INSERT INTO messages (conversation_id, content, sender_type, is_read, created_at) VALUES ($1, $2, $3, $4, NOW())',
+            [conversationId, 'A human agent took over this conversation', 'bot', false]
+        );
+        await pool.query(
+            'UPDATE conversations SET last_message_at = NOW() WHERE id = $1',
+            [conversationId]
+        );
         // Emit bot message to conversation
         io.to('conv_' + conversationId).emit('chat message', { sender_type: 'bot', conversationId, content: 'A human agent took over this conversation', status: 'handled' });
         res.json({ success: true });
@@ -800,10 +820,19 @@ app.post('/api/business/:id/conversations/:conversationId/let-bot-handle', requi
         const { error, business } = await checkBusinessAccess(businessId, userId);
         if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
         // Update conversation status
-        await pool.execute('UPDATE conversations SET status = ? WHERE id = ? AND business_id = ?', ['active', conversationId, businessId]);
+        await pool.query(
+            'UPDATE conversations SET status = $1 WHERE id = $2 AND business_id = $3',
+            ['active', conversationId, businessId]
+        );
         // Insert bot message
-        await pool.execute('INSERT INTO messages (conversation_id, content, sender_type, is_read, created_at) VALUES (?, ?, ?, ?, NOW())', [conversationId, 'The AI assistant is now handling this conversation.', 'bot', 0]);
-        await pool.execute('UPDATE conversations SET last_message_at = NOW() WHERE id = ?', [conversationId]);
+        await pool.query(
+            'INSERT INTO messages (conversation_id, content, sender_type, is_read, created_at) VALUES ($1, $2, $3, $4, NOW())',
+            [conversationId, 'The AI assistant is now handling this conversation.', 'bot', false]
+        );
+        await pool.query(
+            'UPDATE conversations SET last_message_at = NOW() WHERE id = $1',
+            [conversationId]
+        );
         // Emit bot message to conversation
         io.to('conv_' + conversationId).emit('chat message', { sender_type: 'bot', conversationId, content: 'The AI assistant is now handling this conversation.', status: 'active' });
         res.json({ success: true });
@@ -818,22 +847,18 @@ app.delete('/api/business/:id/conversations/:conversationId', requireLogin, asyn
     const businessId = req.params.id;
     const conversationId = req.params.conversationId;
     try {
-        const connection = await pool.getConnection();
-        try {
-            await connection.beginTransaction();
-            const { error, business } = await checkBusinessAccess(businessId, userId);
-            if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
-            // Delete messages and conversation
-            await connection.execute('DELETE FROM messages WHERE conversation_id = ?', [conversationId]);
-            await connection.execute('DELETE FROM conversations WHERE id = ? AND business_id = ?', [conversationId, businessId]);
-            await connection.commit();
-            res.json({ success: true });
-        } catch (err) {
-            await connection.rollback();
-            throw err;
-        } finally {
-            connection.release();
-        }
+        const { error, business } = await checkBusinessAccess(businessId, userId);
+        if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
+        // Delete messages and conversation
+        await pool.query(
+            'DELETE FROM messages WHERE conversation_id = $1',
+            [conversationId]
+        );
+        await pool.query(
+            'DELETE FROM conversations WHERE id = $1 AND business_id = $2',
+            [conversationId, businessId]
+        );
+        res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: 'Server error' });
     }
@@ -847,11 +872,8 @@ app.get('/api/business/:id/team', requireLogin, async (req, res) => {
         const { error, business } = await checkBusinessAccess(businessId, userId);
         if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
         // Get team members
-        const [teamRows] = await pool.execute(
-            `SELECT u.id, u.name, u.email, bu.role 
-             FROM users u 
-             JOIN business_users bu ON u.id = bu.user_id 
-             WHERE bu.business_id = ?`,
+        const { rows: teamRows } = await pool.query(
+            'SELECT u.id, u.name, u.email, bu.role FROM users u JOIN business_users bu ON u.id = bu.user_id WHERE bu.business_id = $1',
             [businessId]
         );
         res.json({ team: teamRows });
@@ -867,25 +889,21 @@ app.post('/api/business/:id/team', requireLogin, async (req, res) => {
     const { email, role } = req.body;
     if (!email || !role) return res.status(400).json({ error: 'Missing fields' });
     try {
-        const connection = await pool.getConnection();
-        try {
-            await connection.beginTransaction();
-            const { error, business } = await checkBusinessAccess(businessId, userId);
-            if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
-            // Find user by email
-            const [userRows] = await connection.execute('SELECT * FROM users WHERE email = ?', [email]);
-            if (userRows.length === 0) return res.status(404).json({ error: 'User not found' });
-            const newUser = userRows[0];
-            // Add to business_users
-            await connection.execute('INSERT IGNORE INTO business_users (business_id, user_id, role) VALUES (?, ?, ?)', [businessId, newUser.id, role]);
-            await connection.commit();
-            res.json({ success: true });
-        } catch (err) {
-            await connection.rollback();
-            throw err;
-        } finally {
-            connection.release();
-        }
+        const { error, business } = await checkBusinessAccess(businessId, userId);
+        if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
+        // Find user by email
+        const { rows: userRows } = await pool.query(
+            'SELECT * FROM users WHERE email = $1',
+            [email]
+        );
+        if (userRows.length === 0) return res.status(404).json({ error: 'User not found' });
+        const newUser = userRows[0];
+        // Add to business_users
+        await pool.query(
+            'INSERT INTO business_users (business_id, user_id, role) VALUES ($1, $2, $3)',
+            [businessId, newUser.id, role]
+        );
+        res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: 'Server error' });
     }
@@ -900,7 +918,10 @@ app.delete('/api/business/:id/team/:userId', requireLogin, async (req, res) => {
         const { error, business } = await checkBusinessAccess(businessId, userId);
         if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
         // Remove from business_users
-        await pool.execute('DELETE FROM business_users WHERE business_id = ? AND user_id = ?', [businessId, removeUserId]);
+        await pool.query(
+            'DELETE FROM business_users WHERE business_id = $1 AND user_id = $2',
+            [businessId, removeUserId]
+        );
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: 'Server error' });
@@ -928,8 +949,8 @@ app.post('/api/business/:id/widget-settings', requireLogin, async (req, res) => 
     try {
         const { error, business } = await checkBusinessAccess(businessId, userId);
         if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
-        await pool.execute(
-            'UPDATE businesses SET widget_header_name = ?, widget_header_color = ?, widget_quick_replies = ?, widget_h1_color = ?, widget_button_color = ?, widget_visitor_message_color = ? WHERE id = ?',
+        await pool.query(
+            'UPDATE businesses SET widget_header_name = $1, widget_header_color = $2, widget_quick_replies = $3, widget_h1_color = $4, widget_button_color = $5, widget_visitor_message_color = $6 WHERE id = $7',
             [widget_header_name, widget_header_color, widget_quick_replies, widget_h1_color, widget_button_color, widget_visitor_message_color, businessId]
         );
         res.json({ success: true });
@@ -947,7 +968,10 @@ app.post('/api/business/:id/conversations/:conversationId/mark-read', requireLog
         const { error, business } = await checkBusinessAccess(businessId, userId);
         if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
         // Mark all visitor messages as read
-        await pool.execute('UPDATE messages SET is_read = 1 WHERE conversation_id = ? AND sender_type = ? AND is_read = 0', [conversationId, 'user']);
+        await pool.query(
+            'UPDATE messages SET is_read = $1 WHERE conversation_id = $2 AND sender_type = $3 AND is_read = false',
+            [true, conversationId, 'user']
+        );
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: 'Server error' });
@@ -991,9 +1015,9 @@ app.get('/api/business/:businessId/ai-settings', requireLogin, async (req, res) 
 
     try {
         // Check if user has access to this business
-        const [business] = await pool.execute(
-            'SELECT * FROM businesses WHERE id = ? AND (owner_user_id = ? OR id IN (SELECT business_id FROM business_users WHERE user_id = ?))',
-            [businessId, userId, userId]
+        const { rows: business } = await pool.query(
+            'SELECT * FROM businesses WHERE id = $1 AND (owner_user_id = $2 OR id IN (SELECT business_id FROM business_users WHERE user_id = $2))',
+            [businessId, userId]
         );
 
         if (business.length === 0) {
@@ -1023,9 +1047,9 @@ app.get('/api/business/:businessId/training-data', requireLogin, async (req, res
 
     try {
         // Check if user has access to this business
-        const [business] = await pool.execute(
-            'SELECT * FROM businesses WHERE id = ? AND (owner_user_id = ? OR id IN (SELECT business_id FROM business_users WHERE user_id = ?))',
-            [businessId, userId, userId]
+        const { rows: business } = await pool.query(
+            'SELECT * FROM businesses WHERE id = $1 AND (owner_user_id = $2 OR id IN (SELECT business_id FROM business_users WHERE user_id = $2))',
+            [businessId, userId]
         );
 
         if (business.length === 0) {
@@ -1033,8 +1057,8 @@ app.get('/api/business/:businessId/training-data', requireLogin, async (req, res
         }
 
         // Get training data
-        const [trainingData] = await pool.execute(
-            'SELECT * FROM ai_training_data WHERE business_id = ? ORDER BY updated_at DESC',
+        const { rows: trainingData } = await pool.query(
+            'SELECT * FROM ai_training_data WHERE business_id = $1 ORDER BY updated_at DESC',
             [businessId]
         );
 
@@ -1056,9 +1080,9 @@ app.post('/api/business/:businessId/training-data', requireLogin, async (req, re
 
     try {
         // Check if user has access to this business
-        const [business] = await pool.execute(
-            'SELECT * FROM businesses WHERE id = ? AND (owner_user_id = ? OR id IN (SELECT business_id FROM business_users WHERE user_id = ? AND role = "admin"))',
-            [businessId, userId, userId]
+        const { rows: business } = await pool.query(
+            'SELECT * FROM businesses WHERE id = $1 AND (owner_user_id = $2 OR id IN (SELECT business_id FROM business_users WHERE user_id = $2 AND role = $3))',
+            [businessId, userId, 'admin']
         );
 
         if (business.length === 0) {
@@ -1066,8 +1090,8 @@ app.post('/api/business/:businessId/training-data', requireLogin, async (req, re
         }
 
         // Insert training data
-        await pool.execute(
-            'INSERT INTO ai_training_data (business_id, question, answer) VALUES (?, ?, ?)',
+        await pool.query(
+            'INSERT INTO ai_training_data (business_id, question, answer) VALUES ($1, $2, $3)',
             [businessId, question, answer]
         );
 
@@ -1086,9 +1110,9 @@ app.get('/api/business/:businessId/training-data/:id', requireLogin, async (req,
 
     try {
         // Check if user has access to this business
-        const [business] = await pool.execute(
-            'SELECT * FROM businesses WHERE id = ? AND (owner_user_id = ? OR id IN (SELECT business_id FROM business_users WHERE user_id = ?))',
-            [businessId, userId, userId]
+        const { rows: business } = await pool.query(
+            'SELECT * FROM businesses WHERE id = $1 AND (owner_user_id = $2 OR id IN (SELECT business_id FROM business_users WHERE user_id = $2))',
+            [businessId, userId]
         );
 
         if (business.length === 0) {
@@ -1096,8 +1120,8 @@ app.get('/api/business/:businessId/training-data/:id', requireLogin, async (req,
         }
 
         // Get training data
-        const [trainingData] = await pool.execute(
-            'SELECT * FROM ai_training_data WHERE id = ? AND business_id = ?',
+        const { rows: trainingData } = await pool.query(
+            'SELECT * FROM ai_training_data WHERE id = $1 AND business_id = $2',
             [trainingId, businessId]
         );
 
@@ -1123,9 +1147,9 @@ app.delete('/api/business/:businessId/training-data/:id', requireLogin, async (r
 
     try {
         // Check if user has access to this business
-        const [business] = await pool.execute(
-            'SELECT * FROM businesses WHERE id = ? AND (owner_user_id = ? OR id IN (SELECT business_id FROM business_users WHERE user_id = ? AND role = "admin"))',
-            [businessId, userId, userId]
+        const { rows: business } = await pool.query(
+            'SELECT * FROM businesses WHERE id = $1 AND (owner_user_id = $2 OR id IN (SELECT business_id FROM business_users WHERE user_id = $2 AND role = $3))',
+            [businessId, userId, 'admin']
         );
 
         if (business.length === 0) {
@@ -1133,8 +1157,8 @@ app.delete('/api/business/:businessId/training-data/:id', requireLogin, async (r
         }
 
         // Delete training data
-        await pool.execute(
-            'DELETE FROM ai_training_data WHERE id = ? AND business_id = ?',
+        await pool.query(
+            'DELETE FROM ai_training_data WHERE id = $1 AND business_id = $2',
             [trainingId, businessId]
         );
 
@@ -1149,23 +1173,23 @@ app.delete('/api/business/:businessId/training-data/:id', requireLogin, async (r
 app.post('/api/business/:businessId/ai-settings', requireLogin, async (req, res) => {
     const businessId = parseInt(req.params.businessId);
     const userId = req.session.userId;
-    const { chatbase_api_key, chatbase_agent_id, n8n_webhook_url, n8n_system_prompt } = req.body;
+    const { chatbase_api_key, chatbase_agent_id, n8n_system_prompt } = req.body;
 
     try {
         // Check if user has access to this business
-        const [business] = await pool.execute(
-            'SELECT * FROM businesses WHERE id = ? AND (owner_user_id = ? OR id IN (SELECT business_id FROM business_users WHERE user_id = ? AND role = "admin"))',
-            [businessId, userId, userId]
+        const { rows: business } = await pool.query(
+            'SELECT * FROM businesses WHERE id = $1 AND (owner_user_id = $2 OR id IN (SELECT business_id FROM business_users WHERE user_id = $2 AND role = $3))',
+            [businessId, userId, 'admin']
         );
 
         if (business.length === 0) {
             return res.status(403).json({ error: 'Access denied' });
         }
 
-        // Update AI settings
-        await pool.execute(
-            'UPDATE businesses SET chatbase_api_key = ?, chatbase_agent_id = ?, n8n_webhook_url = ?, n8n_system_prompt = ? WHERE id = ?',
-            [chatbase_api_key, chatbase_agent_id, n8n_webhook_url, n8n_system_prompt, businessId]
+        // Update AI settings (exclude n8n_webhook_url)
+        await pool.query(
+            'UPDATE businesses SET chatbase_api_key = $1, chatbase_agent_id = $2, n8n_system_prompt = $3 WHERE id = $4',
+            [chatbase_api_key, chatbase_agent_id, n8n_system_prompt, businessId]
         );
 
         res.json({ success: true });

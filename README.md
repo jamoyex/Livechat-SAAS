@@ -2,7 +2,7 @@
 
 # Livechat-SAAS
 
-A real-time chat application built with Node.js, Express, MySQL, and Socket.IO. This application features a multi-tenant structure where users can manage multiple businesses, each with their own team and chat widget.
+A real-time chat application built with Node.js, Express, PostgreSQL, and Socket.IO. This application features a multi-tenant structure where users can manage multiple businesses, each with their own team and chat widget.
 
 ## Features
 
@@ -19,7 +19,7 @@ A real-time chat application built with Node.js, Express, MySQL, and Socket.IO. 
 ## Prerequisites
 
 - Node.js (v14 or higher)
-- MySQL (v5.7+ or MariaDB)
+- PostgreSQL (v13+)
 - npm or yarn
 
 ## Installation
@@ -35,7 +35,7 @@ cd Livechat-SAAS
 npm install
 ```
 
-3. Create a `.env` file in the root directory with your MySQL and app credentials:
+3. Create a `.env` file in the root directory with your PostgreSQL and app credentials:
 ```
 DB_HOST=your-db-host
 DB_USER=your-db-user
@@ -47,7 +47,7 @@ PORT=3001
 
 4. Run the schema to create the tables:
 ```bash
-mysql -u <user> -p <database> < schema.sql
+psql -U <user> -d <database> -f schema_pg.sql
 ```
 
 5. Start the application:
@@ -68,13 +68,17 @@ node app.js
 - id (PK)
 - name
 - owner_user_id (FK to users)
-- widget_settings (JSON, optional)
+- widget_settings (JSONB, optional)
 - widget_quick_replies (TEXT)
 - widget_header_color (VARCHAR)
 - widget_header_name (VARCHAR)
 - widget_h1_color (VARCHAR)
 - widget_button_color (VARCHAR)
 - widget_visitor_message_color (VARCHAR)
+- chatbase_api_key (VARCHAR)
+- chatbase_agent_id (VARCHAR)
+- n8n_webhook_url (VARCHAR)
+- n8n_system_prompt (TEXT)
 - created_at
 
 ### business_users
@@ -90,7 +94,6 @@ node app.js
 - business_id (FK)
 - visitor_name
 - visitor_email
-- assigned_to (FK to business_users, nullable)
 - status (`active`, `handled`, `closed`)
 - last_message_at
 - created_at
@@ -100,9 +103,17 @@ node app.js
 - conversation_id (FK)
 - content (TEXT)
 - sender_type (`user`, `agent`, `bot`)
-- sender_id (FK to business_users, nullable)
-- is_read (TINYINT, 0/1)
+- ai_response_id (VARCHAR, optional)
+- is_read (BOOLEAN)
 - created_at
+
+### ai_training_data
+- id (PK)
+- business_id (FK)
+- question (TEXT)
+- answer (TEXT)
+- created_at
+- updated_at
 
 ## Authentication Flow
 - Users register with name, email, and password
