@@ -95,7 +95,8 @@ async function loadAllDashboardData() {
     takeOverBtn.classList.add('d-none');
     letBotHandleBtn.classList.add('d-none');
     deleteConversationBtn.classList.add('d-none');
-    activeNotice.classList.add('d-none');
+    activeNotice.classList.remove('d-none');
+    updateBotLastTrainedDisplay();
 }
 
 // Load conversations
@@ -121,8 +122,8 @@ async function loadConversations(page = 1, search = '') {
         div.innerHTML = `
             <span class="status-badge status-${conv.status}">${conv.status.charAt(0).toUpperCase() + conv.status.slice(1)}</span>
             <div class="flex-grow-1 min-w-0">
-                <div class="text-sm text-truncate ${conv.unread_count > 0 ? 'unread-message' : ''}">${conv.last_bot_message || '<span class=\'text-muted\'>No response yet</span>'}</div>
-                <div class="text-sm text-muted text-truncate ${conv.unread_count > 0 ? 'unread-message' : ''}">${conv.last_user_message || '<span class=\'text-muted\'>No messages yet</span>'}</div>
+                <div class="text-sm text-truncate ${conv.unread_count > 0 ? 'unread-message' : ''}">${truncatePreview(conv.last_bot_message || '<span class=\'text-muted\'>No response yet</span>')}
+                <div class="text-sm text-muted text-truncate ${conv.unread_count > 0 ? 'unread-message' : ''}">${truncatePreview(conv.last_user_message || '<span class=\'text-muted\'>No messages yet</span>')}
             </div>
             <span class="text-xs text-muted mt-1">${conv.last_message_time ? timeAgo(new Date(conv.last_message_time)) : ''}</span>
         `;
@@ -130,6 +131,12 @@ async function loadConversations(page = 1, search = '') {
         conversationsList.appendChild(div);
     });
     loadMoreBtn.style.display = data.hasMore ? '' : 'none';
+}
+
+// Helper function to truncate preview text
+function truncatePreview(text, maxLength = 60) {
+    if (!text) return '';
+    return text.length > maxLength ? text.slice(0, maxLength - 3) + '...' : text;
 }
 
 // Format message (markdown, images, links)
@@ -475,28 +482,71 @@ if (aiSettingsForm) {
     });
 }
 
-// Load training data
+// Add DOM references for Link and Text
+const linksDataTableBody = document.getElementById('linksDataTableBody');
+const textDataTableBody = document.getElementById('textDataTableBody');
+const saveLinkBtn = document.getElementById('saveLinkBtn');
+const addLinkForm = document.getElementById('addLinkForm');
+const saveTextBtn = document.getElementById('saveTextBtn');
+const addTextForm = document.getElementById('addTextForm');
+
+// Update loadTrainingData to support all types
 async function loadTrainingData() {
     if (!currentBusinessId) return;
     try {
         const response = await fetch(`/api/business/${currentBusinessId}/training-data`);
         const data = await response.json();
         if (data.success) {
-            trainingDataTableBody.innerHTML = data.trainingData.map(item => `
-                <tr>
-                    <td>${item.question}</td>
-                    <td>${item.answer}</td>
-                    <td>${new Date(item.updated_at).toLocaleString()}</td>
-                    <td>
-                        <button class="btn btn-sm btn-outline-primary me-1" onclick="editTrainingData(${item.id})">
-                            <i class="fas fa-edit"></i>
-                        </button>
-                        <button class="btn btn-sm btn-outline-danger" onclick="deleteTrainingData(${item.id})">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </td>
-                </tr>
-            `).join('');
+            // Q&A
+            trainingDataTableBody.innerHTML = data.trainingData
+                .filter(item => item.type === 'qa')
+                .map(item => `
+                    <tr>
+                        <td>${item.question || ''}</td>
+                        <td>${item.answer || ''}</td>
+                        <td>${new Date(item.updated_at).toLocaleString()}</td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-primary me-1" onclick="editTrainingData(${item.id})">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="deleteTrainingData(${item.id})">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `).join('');
+            // Links
+            if (linksDataTableBody) {
+                linksDataTableBody.innerHTML = data.trainingData
+                    .filter(item => item.type === 'link')
+                    .map(item => `
+                        <tr>
+                            <td>${item.link || ''}</td>
+                            <td>${new Date(item.updated_at).toLocaleString()}</td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-danger" onclick="deleteLinkData(${item.id})">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `).join('');
+            }
+            // Text
+            if (textDataTableBody) {
+                textDataTableBody.innerHTML = data.trainingData
+                    .filter(item => item.type === 'text')
+                    .map(item => `
+                        <tr>
+                            <td>${item.text || ''}</td>
+                            <td>${new Date(item.updated_at).toLocaleString()}</td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-danger" onclick="deleteTextData(${item.id})">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `).join('');
+            }
         }
     } catch (error) {
         console.error('Error loading training data:', error);
@@ -504,38 +554,78 @@ async function loadTrainingData() {
     }
 }
 
-// Save new training data
-if (saveTrainingBtn) {
-    saveTrainingBtn.addEventListener('click', async function() {
+// Add a URL validation helper
+function isValidUrl(string) {
+    try {
+        new URL(string);
+        return true;
+    } catch (_) {
+        return false;
+    }
+}
+
+// Save new link
+if (saveLinkBtn) {
+    saveLinkBtn.addEventListener('click', async function() {
         if (!currentBusinessId) return;
-        const question = document.getElementById('trainingQuestion').value;
-        const answer = document.getElementById('trainingAnswer').value;
-        
-        if (!question || !answer) {
-            showAlert('Please fill in all fields', 'warning');
+        const link = document.getElementById('linkInput').value;
+        if (!link) {
+            showAlert('Please enter a link', 'warning');
             return;
         }
-
+        if (!isValidUrl(link)) {
+            showAlert('Please enter a valid URL (e.g., https://example.com)', 'warning');
+            return;
+        }
         try {
             const response = await fetch(`/api/business/${currentBusinessId}/training-data`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ question, answer })
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ link, type: 'link' })
             });
             const data = await response.json();
             if (data.success) {
-                showAlert('Training data saved successfully', 'success');
-                bootstrap.Modal.getInstance(document.getElementById('addTrainingModal')).hide();
-                addTrainingForm.reset();
+                showAlert('Link saved successfully', 'success');
+                bootstrap.Modal.getInstance(document.getElementById('addLinkModal')).hide();
+                addLinkForm.reset();
                 loadTrainingData();
             } else {
-                showAlert('Failed to save training data', 'danger');
+                showAlert('Failed to save link', 'danger');
             }
         } catch (error) {
-            console.error('Error saving training data:', error);
-            showAlert('An error occurred while saving training data', 'danger');
+            console.error('Error saving link:', error);
+            showAlert('An error occurred while saving link', 'danger');
+        }
+    });
+}
+
+// Save new text
+if (saveTextBtn) {
+    saveTextBtn.addEventListener('click', async function() {
+        if (!currentBusinessId) return;
+        const text = document.getElementById('textInput').value;
+        if (!text) {
+            showAlert('Please enter text', 'warning');
+            return;
+        }
+        try {
+            const response = await fetch(`/api/business/${currentBusinessId}/training-data`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text, type: 'text' })
+            });
+            const data = await response.json();
+            if (data.success) {
+                showAlert('Text saved successfully', 'success');
+                bootstrap.Modal.getInstance(document.getElementById('addTextModal')).hide();
+                addTextForm.reset();
+                loadTrainingData();
+            } else {
+                showAlert('Failed to save text', 'danger');
+            }
+        } catch (error) {
+            console.error('Error saving text:', error);
+            showAlert('An error occurred while saving text', 'danger');
         }
     });
 }
@@ -578,6 +668,46 @@ async function deleteTrainingData(id) {
     }
 }
 
+// Delete link data
+async function deleteLinkData(id) {
+    if (!currentBusinessId || !confirm('Are you sure you want to delete this link?')) return;
+    try {
+        const response = await fetch(`/api/business/${currentBusinessId}/training-data/${id}`, {
+            method: 'DELETE'
+        });
+        const data = await response.json();
+        if (data.success) {
+            showAlert('Link deleted successfully', 'success');
+            loadTrainingData();
+        } else {
+            showAlert('Failed to delete link', 'danger');
+        }
+    } catch (error) {
+        console.error('Error deleting link:', error);
+        showAlert('An error occurred while deleting link', 'danger');
+    }
+}
+
+// Delete text data
+async function deleteTextData(id) {
+    if (!currentBusinessId || !confirm('Are you sure you want to delete this text?')) return;
+    try {
+        const response = await fetch(`/api/business/${currentBusinessId}/training-data/${id}`, {
+            method: 'DELETE'
+        });
+        const data = await response.json();
+        if (data.success) {
+            showAlert('Text deleted successfully', 'success');
+            loadTrainingData();
+        } else {
+            showAlert('Failed to delete text', 'danger');
+        }
+    } catch (error) {
+        console.error('Error deleting text:', error);
+        showAlert('An error occurred while deleting text', 'danger');
+    }
+}
+
 // On initial load
 loadConversations();
 
@@ -614,5 +744,51 @@ const tabTraining = document.getElementById('tab-training');
 if (tabTraining) {
     tabTraining.addEventListener('click', function() {
         loadTrainingData();
+    });
+}
+
+function updateBotLastTrainedDisplay() {
+    var botLastTrained = document.getElementById('botLastTrained');
+    if (botLastTrained) {
+        var ts = botLastTrained.dataset.timestamp;
+        if (ts) {
+            var utcString = ts.replace(' ', 'T') + 'Z';
+            var date = new Date(utcString);
+            botLastTrained.textContent = 'Bot last trained: ' + date.toLocaleString();
+        } else {
+            botLastTrained.textContent = 'Not trained yet';
+        }
+    }
+}
+
+if (saveTrainingBtn) {
+    saveTrainingBtn.addEventListener('click', async function() {
+        if (!currentBusinessId) return;
+        const question = document.getElementById('trainingQuestion').value;
+        const answer = document.getElementById('trainingAnswer').value;
+        const type = 'qa';
+        if (!question || !answer) {
+            showAlert('Please fill in all fields', 'warning');
+            return;
+        }
+        try {
+            const response = await fetch(`/api/business/${currentBusinessId}/training-data`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question, answer, type })
+            });
+            const data = await response.json();
+            if (data.success) {
+                showAlert('Training data saved successfully', 'success');
+                bootstrap.Modal.getInstance(document.getElementById('addTrainingModal')).hide();
+                addTrainingForm.reset();
+                loadTrainingData();
+            } else {
+                showAlert('Failed to save training data', 'danger');
+            }
+        } catch (error) {
+            console.error('Error saving training data:', error);
+            showAlert('An error occurred while saving training data', 'danger');
+        }
     });
 } 

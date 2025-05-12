@@ -1,16 +1,5 @@
 require('dotenv').config();
 
-// Check required environment variables
-const requiredEnvVars = ['DB_HOST', 'DB_USER', 'DB_PASS', 'DB_NAME', 'SESSION_SECRET'];
-const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
-
-if (missingEnvVars.length > 0) {
-    console.error('Missing required environment variables:', missingEnvVars.join(', '));
-    process.exit(1);
-}
-
-console.log('DB_HOST:', process.env.DB_HOST);
-
 const express = require('express');
 const path = require('path');
 const session = require('express-session');
@@ -511,7 +500,7 @@ app.get('/dashboard', requireLogin, async (req, res) => {
             selectedBusiness = businesses[0];
         }
     }
-    res.render('dashboard', { businesses, selectedBusiness, host: req.headers.host });
+    res.render('dashboard', { businesses, selectedBusiness, host: req.headers.host, userId: req.session.userId });
 });
 
 // Add pretty URL route for dashboard by business ID
@@ -543,7 +532,7 @@ app.get('/dashboard/:businessId', requireLogin, async (req, res) => {
         // Render add business form directly
         return res.render('add_business');
     }
-    res.render('dashboard', { businesses, selectedBusiness, host: req.headers.host });
+    res.render('dashboard', { businesses, selectedBusiness, host: req.headers.host, userId: req.session.userId });
 });
 
 // Add business POST route (matches add_business.ejs form)
@@ -1086,7 +1075,7 @@ app.get('/api/business/:businessId/training-data', requireLogin, async (req, res
 app.post('/api/business/:businessId/training-data', requireLogin, async (req, res) => {
     const businessId = parseInt(req.params.businessId);
     const userId = req.session.userId;
-    const { question, answer } = req.body;
+    const { question, answer, type, link, text } = req.body;
 
     try {
         // Check if user has access to this business
@@ -1099,11 +1088,23 @@ app.post('/api/business/:businessId/training-data', requireLogin, async (req, re
             return res.status(403).json({ error: 'Access denied' });
         }
 
-        // Insert training data
-        await pool.query(
-            'INSERT INTO ai_training_data (business_id, question, answer) VALUES ($1, $2, $3)',
-            [businessId, question, answer]
-        );
+        // Insert training data based on type
+        if (type === 'link') {
+            await pool.query(
+                'INSERT INTO ai_training_data (business_id, type, link) VALUES ($1, $2, $3)',
+                [businessId, 'link', link]
+            );
+        } else if (type === 'text') {
+            await pool.query(
+                'INSERT INTO ai_training_data (business_id, type, text) VALUES ($1, $2, $3)',
+                [businessId, 'text', text]
+            );
+        } else {
+            await pool.query(
+                'INSERT INTO ai_training_data (business_id, question, answer, type) VALUES ($1, $2, $3, $4)',
+                [businessId, question, answer, 'qa']
+            );
+        }
 
         res.json({ success: true });
     } catch (error) {
@@ -1205,6 +1206,86 @@ app.post('/api/business/:businessId/ai-settings', requireLogin, async (req, res)
         res.json({ success: true });
     } catch (error) {
         console.error('Error updating AI settings:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// 2. Add train-bot endpoint
+app.post('/api/business/:id/train-bot', requireLogin, async (req, res) => {
+    const userId = req.body.userId;
+    const businessId = req.params.id;
+    const webhookUrl = process.env.TRAIN_BOT_WEBHOOK_URL;
+    try {
+        // Check access
+        const { error, business } = await checkBusinessAccess(businessId, req.session.userId);
+        if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
+
+        // Log outgoing request
+        console.log('Calling webhook:', webhookUrl, { businessId, userId });
+
+        // Call webhook using built-in fetch
+        const webhookRes = await fetch(webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ businessId, userId })
+        });
+
+        // Log response
+        const webhookText = await webhookRes.text();
+        console.log('Webhook response status:', webhookRes.status);
+        console.log('Webhook response body:', webhookText);
+
+        if (!webhookRes.ok) {
+            return res.status(500).json({ error: 'Webhook call failed', details: webhookText });
+        }
+
+        // Return webhook response to client
+        res.json({ success: true, webhookResponse: webhookText });
+    } catch (err) {
+        console.error('Train bot error:', err);
+        res.status(500).json({ error: 'Failed to train bot' });
+    }
+});
+
+// Update training data
+app.put('/api/business/:businessId/training-data/:id', requireLogin, async (req, res) => {
+    const businessId = parseInt(req.params.businessId);
+    const trainingId = parseInt(req.params.id);
+    const userId = req.session.userId;
+    const { question, answer, type, link, text } = req.body;
+
+    try {
+        // Check if user has access to this business
+        const { rows: business } = await pool.query(
+            'SELECT * FROM businesses WHERE id = $1 AND (owner_user_id = $2 OR id IN (SELECT business_id FROM business_users WHERE user_id = $2 AND role = $3))',
+            [businessId, userId, 'admin']
+        );
+
+        if (business.length === 0) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+
+        // Update training data based on type
+        if (type === 'link') {
+            await pool.query(
+                'UPDATE ai_training_data SET link = $1, question = NULL, answer = NULL, text = NULL, type = $2, updated_at = NOW() WHERE id = $3 AND business_id = $4',
+                [link, 'link', trainingId, businessId]
+            );
+        } else if (type === 'text') {
+            await pool.query(
+                'UPDATE ai_training_data SET text = $1, question = NULL, answer = NULL, link = NULL, type = $2, updated_at = NOW() WHERE id = $3 AND business_id = $4',
+                [text, 'text', trainingId, businessId]
+            );
+        } else {
+            await pool.query(
+                'UPDATE ai_training_data SET question = $1, answer = $2, link = NULL, text = NULL, type = $3, updated_at = NOW() WHERE id = $4 AND business_id = $5',
+                [question, answer, 'qa', trainingId, businessId]
+            );
+        }
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error updating training data:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });

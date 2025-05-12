@@ -95,6 +95,8 @@
             min-width: 0;
             background: #f6f8fa;
             border-radius: 0;
+            overflow-x: hidden;
+            word-break: break-word;
         }
         .conversations-header { flex: 0 0 auto; }
         #conversationsList { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
@@ -289,6 +291,51 @@
         /* Responsive adjustments */
         @media (max-width: 991.98px) {
             .dashboard-root, .sidebar, .main-content, .tab-section.active { height: auto !important; min-height: 0 !important; }
+        }
+        .text-truncate {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
+            display: block;
+        }
+        .conversations-col {
+            overflow-x: hidden !important;
+            max-width: 100%;
+        }
+        .chat-preview {
+            max-width: 100%;
+            overflow-x: hidden;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+        }
+        .status-badge {
+            display: inline-block;
+            white-space: nowrap;
+            min-width: 60px;
+            text-align: center;
+            vertical-align: middle;
+        }
+        .flex-grow-1, .min-w-0 {
+            min-width: 0;
+            max-width: 100%;
+        }
+        .text-truncate {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
+            display: block;
+        }
+        .table.table-hover {
+            table-layout: fixed;
+            width: 100%;
+        }
+        .table.table-hover td, .table.table-hover th {
+            word-break: break-word;
+            white-space: normal;
+            vertical-align: top;
         }
     </style>
 </head>
@@ -504,33 +551,109 @@
                         <div class="col-md-10">
                             <div class="card">
                                 <div class="card-body">
-                                    <div class="d-flex justify-content-between align-items-center mb-4">
-                                        <h4 class="card-title mb-0">AI Training Data</h4>
-                                        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addTrainingModal">
-                                            <i class="fas fa-plus me-1"></i>Add Training Data
-                                        </button>
+                                    <div class="d-flex justify-content-end align-items-center mb-3">
+                                        <span id="botLastTrained" class="me-3 text-muted" style="font-size:0.95em;"
+                                          <% if (selectedBusiness.bot_last_trained) { %>
+                                            data-timestamp="<%= selectedBusiness.bot_last_trained %>"
+                                          <% } %>
+                                        >
+                                          <% if (selectedBusiness.bot_last_trained) { %>
+                                            <!-- Placeholder, will be replaced by JS -->
+                                          <% } else { %>
+                                            Not trained yet
+                                          <% } %>
+                                        </span>
+                                        <button class="btn btn-warning" id="trainBotBtn" data-bs-toggle="modal" data-bs-target="#trainBotModal"><i class="fas fa-brain me-1"></i>Train Bot</button>
                                     </div>
-                                    <div id="trainingDataList" class="table-responsive">
-                                        <table class="table table-hover">
-                                            <thead>
-                                                <tr>
-                                                    <th>Question</th>
-                                                    <th>Answer</th>
-                                                    <th>Last Updated</th>
-                                                    <th>Actions</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody id="trainingDataTableBody">
-                                                <!-- Training data will be loaded here -->
-                                            </tbody>
-                                        </table>
+                                    <ul class="nav nav-tabs mb-4" id="trainingTabs" role="tablist">
+                                        <li class="nav-item" role="presentation">
+                                            <button class="nav-link active" id="qa-tab" data-bs-toggle="tab" data-bs-target="#qa-pane" type="button" role="tab" aria-controls="qa-pane" aria-selected="true">Q&amp;A</button>
+                                        </li>
+                                        <li class="nav-item" role="presentation">
+                                            <button class="nav-link" id="links-tab" data-bs-toggle="tab" data-bs-target="#links-pane" type="button" role="tab" aria-controls="links-pane" aria-selected="false">Links</button>
+                                        </li>
+                                        <li class="nav-item" role="presentation">
+                                            <button class="nav-link" id="text-tab" data-bs-toggle="tab" data-bs-target="#text-pane" type="button" role="tab" aria-controls="text-pane" aria-selected="false">Text</button>
+                                        </li>
+                                    </ul>
+                                    <div class="tab-content" id="trainingTabsContent">
+                                        <!-- Q&A Tab -->
+                                        <div class="tab-pane fade show active" id="qa-pane" role="tabpanel" aria-labelledby="qa-tab">
+                                            <div class="d-flex justify-content-between align-items-center mb-4">
+                                                <h4 class="card-title mb-0">AI Training Data (Q&amp;A)</h4>
+                                                <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addTrainingModal">
+                                                    <i class="fas fa-plus me-1"></i>Add Q&amp;A
+                                                </button>
+                                            </div>
+                                            <div id="trainingDataList" class="table-responsive">
+                                                <table class="table table-hover">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>Question</th>
+                                                            <th>Answer</th>
+                                                            <th>Last Updated</th>
+                                                            <th>Actions</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody id="trainingDataTableBody">
+                                                        <!-- Training data will be loaded here -->
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                        <!-- Links Tab -->
+                                        <div class="tab-pane fade" id="links-pane" role="tabpanel" aria-labelledby="links-tab">
+                                            <div class="d-flex justify-content-between align-items-center mb-4">
+                                                <h4 class="card-title mb-0">AI Training Data (Links)</h4>
+                                                <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addLinkModal">
+                                                    <i class="fas fa-plus me-1"></i>Add Link
+                                                </button>
+                                            </div>
+                                            <div id="linksDataList" class="table-responsive">
+                                                <table class="table table-hover">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>Link</th>
+                                                            <th>Last Updated</th>
+                                                            <th>Actions</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody id="linksDataTableBody">
+                                                        <!-- Links will be loaded here -->
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                        <!-- Text Tab -->
+                                        <div class="tab-pane fade" id="text-pane" role="tabpanel" aria-labelledby="text-tab">
+                                            <div class="d-flex justify-content-between align-items-center mb-4">
+                                                <h4 class="card-title mb-0">AI Training Data (Text)</h4>
+                                                <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addTextModal">
+                                                    <i class="fas fa-plus me-1"></i>Add Text
+                                                </button>
+                                            </div>
+                                            <div id="textDataList" class="table-responsive">
+                                                <table class="table table-hover">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>Text</th>
+                                                            <th>Last Updated</th>
+                                                            <th>Actions</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody id="textDataTableBody">
+                                                        <!-- Text entries will be loaded here -->
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
-                <!-- Add Training Data Modal -->
+                <!-- Add Training Data Modal (Q&A) -->
                 <div class="modal fade" id="addTrainingModal" tabindex="-1" aria-labelledby="addTrainingModalLabel" aria-hidden="true">
                     <div class="modal-dialog">
                         <div class="modal-content">
@@ -553,6 +676,52 @@
                             <div class="modal-footer">
                                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                                 <button type="button" class="btn btn-primary" id="saveTrainingBtn">Save Training Data</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Add Link Modal -->
+                <div class="modal fade" id="addLinkModal" tabindex="-1" aria-labelledby="addLinkModalLabel" aria-hidden="true">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title" id="addLinkModalLabel">Add Link</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                            </div>
+                            <div class="modal-body">
+                                <form id="addLinkForm">
+                                    <div class="mb-3">
+                                        <label for="linkInput" class="form-label">Link</label>
+                                        <input type="url" class="form-control" id="linkInput" required placeholder="https://example.com">
+                                    </div>
+                                </form>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                <button type="button" class="btn btn-primary" id="saveLinkBtn">Save Link</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Add Text Modal -->
+                <div class="modal fade" id="addTextModal" tabindex="-1" aria-labelledby="addTextModalLabel" aria-hidden="true">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title" id="addTextModalLabel">Add Text</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                            </div>
+                            <div class="modal-body">
+                                <form id="addTextForm">
+                                    <div class="mb-3">
+                                        <label for="textInput" class="form-label">Text</label>
+                                        <textarea class="form-control" id="textInput" rows="5" required></textarea>
+                                    </div>
+                                </form>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                <button type="button" class="btn btn-primary" id="saveTextBtn">Save Text</button>
                             </div>
                         </div>
                     </div>
@@ -671,38 +840,131 @@
     <script src="/socket.io/socket.io.js"></script>
     <script src="/js/business_dashboard.js"></script>
     <script>
-        // Sidebar tab navigation
-        document.querySelectorAll('.sidebar-nav .nav-link').forEach(link => {
-            link.addEventListener('click', function(e) {
-                e.preventDefault();
-                document.querySelectorAll('.sidebar-nav .nav-link').forEach(l => l.classList.remove('active'));
-                this.classList.add('active');
-                const tab = this.dataset.tab;
-                document.querySelectorAll('.tab-section').forEach(sec => sec.classList.remove('active'));
-                if (tab) document.getElementById('section-' + tab).classList.add('active');
-            });
-        });
-        // Business selector change
-        document.getElementById('businessSelector').addEventListener('change', function() {
-            window.location.href = '/dashboard/' + this.value;
-        });
-        // Ensure logout link triggers a full page reload
-        const logoutLink = document.querySelector('a[href="/logout"]');
-        if (logoutLink) {
-            logoutLink.addEventListener('click', function(e) {
-                e.preventDefault();
-                window.location = '/logout';
-            });
-        }
-        document.getElementById('copyWidgetCodeBtn').addEventListener('click', function() {
-            const textarea = document.getElementById('widgetEmbedCode');
-            textarea.select();
-            textarea.setSelectionRange(0, 99999); // For mobile
-            document.execCommand('copy');
-            const msg = document.getElementById('copyWidgetCodeMsg');
-            msg.style.display = 'inline';
-            setTimeout(() => { msg.style.display = 'none'; }, 1200);
+        document.addEventListener('DOMContentLoaded', function() {
+            // Sidebar tab navigation
+            var sidebarLinks = document.querySelectorAll('.sidebar-nav .nav-link');
+            if (sidebarLinks) {
+                sidebarLinks.forEach(link => {
+                    link.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        sidebarLinks.forEach(l => l.classList.remove('active'));
+                        this.classList.add('active');
+                        const tab = this.dataset.tab;
+                        document.querySelectorAll('.tab-section').forEach(sec => sec.classList.remove('active'));
+                        if (tab) {
+                            var section = document.getElementById('section-' + tab);
+                            if (section) section.classList.add('active');
+                        }
+                    });
+                });
+            }
+
+            // Business selector change
+            var businessSelector = document.getElementById('businessSelector');
+            if (businessSelector) {
+                businessSelector.addEventListener('change', function() {
+                    window.location.href = '/dashboard/' + this.value;
+                });
+            }
+
+            // Ensure logout link triggers a full page reload
+            var logoutLink = document.querySelector('a[href="/logout"]');
+            if (logoutLink) {
+                logoutLink.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    window.location = '/logout';
+                });
+            }
+
+            // Copy widget code
+            var copyWidgetCodeBtn = document.getElementById('copyWidgetCodeBtn');
+            var widgetEmbedCode = document.getElementById('widgetEmbedCode');
+            var copyWidgetCodeMsg = document.getElementById('copyWidgetCodeMsg');
+            if (copyWidgetCodeBtn && widgetEmbedCode && copyWidgetCodeMsg) {
+                copyWidgetCodeBtn.addEventListener('click', function() {
+                    widgetEmbedCode.select();
+                    widgetEmbedCode.setSelectionRange(0, 99999); // For mobile
+                    document.execCommand('copy');
+                    copyWidgetCodeMsg.style.display = 'inline';
+                    setTimeout(() => { copyWidgetCodeMsg.style.display = 'none'; }, 1200);
+                });
+            }
+
+            // Train Bot modal logic
+            var currentUserId = "<%= typeof userId !== 'undefined' ? userId : '' %>";
+            var confirmTrainBotBtn = document.getElementById('confirmTrainBotBtn');
+            var trainBotError = document.getElementById('trainBotError');
+            if (confirmTrainBotBtn && trainBotError) {
+                confirmTrainBotBtn.addEventListener('click', function() {
+                    trainBotError.classList.add('d-none');
+                    confirmTrainBotBtn.disabled = true;
+                    confirmTrainBotBtn.textContent = 'Training...';
+                    fetch(`/api/business/<%= selectedBusiness.id %>/train-bot`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ userId: currentUserId })
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        confirmTrainBotBtn.disabled = false;
+                        confirmTrainBotBtn.textContent = 'Train Bot';
+                        if (data.success) {
+                            var modal = bootstrap.Modal.getInstance(document.getElementById('trainBotModal'));
+                            if (modal) modal.hide();
+                            alert('Bot training started!');
+                            if (data.lastTrained) {
+                                var botLastTrained = document.getElementById('botLastTrained');
+                                if (botLastTrained) {
+                                    botLastTrained.textContent = 'Bot last trained: ' + new Date(data.lastTrained).toLocaleString();
+                                    botLastTrained.dataset.timestamp = data.lastTrained;
+                                }
+                            }
+                        } else {
+                            trainBotError.textContent = 'Failed to train bot: ' + (data.error || 'Unknown error');
+                            trainBotError.classList.remove('d-none');
+                        }
+                    })
+                    .catch(() => {
+                        confirmTrainBotBtn.disabled = false;
+                        confirmTrainBotBtn.textContent = 'Train Bot';
+                        trainBotError.textContent = 'Failed to train bot. Network or server error.';
+                        trainBotError.classList.remove('d-none');
+                    });
+                });
+            }
+
+            // Bot last trained display
+            var botLastTrained = document.getElementById('botLastTrained');
+            if (botLastTrained) {
+                var ts = botLastTrained.dataset.timestamp;
+                if (ts) {
+                    var utcString = ts.replace(' ', 'T') + 'Z';
+                    var date = new Date(utcString);
+                    botLastTrained.textContent = 'Bot last trained: ' + date.toLocaleString();
+                } else {
+                    botLastTrained.textContent = 'Not trained yet';
+                }
+            }
         });
     </script>
+    <!-- Train Bot Modal -->
+    <div class="modal fade" id="trainBotModal" tabindex="-1" aria-labelledby="trainBotModalLabel" aria-hidden="true">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="trainBotModalLabel">Train Bot</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <p>Are you sure you want to train the bot? This may take a few minutes.</p>
+            <div id="trainBotError" class="alert alert-danger d-none"></div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="button" class="btn btn-warning" id="confirmTrainBotBtn">Train Bot</button>
+          </div>
+        </div>
+      </div>
+    </div>
 </body>
 </html> 

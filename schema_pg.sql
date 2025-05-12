@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS businesses (
     n8n_webhook_url VARCHAR(255),
     n8n_system_prompt TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    bot_last_trained TIMESTAMP,
     FOREIGN KEY (owner_user_id) REFERENCES users(id)
 );
 
