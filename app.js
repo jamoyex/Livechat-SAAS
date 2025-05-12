@@ -500,6 +500,12 @@ app.get('/dashboard', requireLogin, async (req, res) => {
             selectedBusiness = businesses[0];
         }
     }
+    // Ensure bot_last_trained is an ISO string or null
+    if (selectedBusiness && selectedBusiness.bot_last_trained) {
+        selectedBusiness.bot_last_trained = new Date(selectedBusiness.bot_last_trained).toISOString();
+    } else if (selectedBusiness) {
+        selectedBusiness.bot_last_trained = null;
+    }
     res.render('dashboard', { businesses, selectedBusiness, host: req.headers.host, userId: req.session.userId });
 });
 
@@ -531,6 +537,12 @@ app.get('/dashboard/:businessId', requireLogin, async (req, res) => {
     if (businesses.length === 0) {
         // Render add business form directly
         return res.render('add_business');
+    }
+    // Ensure bot_last_trained is an ISO string or null
+    if (selectedBusiness && selectedBusiness.bot_last_trained) {
+        selectedBusiness.bot_last_trained = new Date(selectedBusiness.bot_last_trained).toISOString();
+    } else if (selectedBusiness) {
+        selectedBusiness.bot_last_trained = null;
     }
     res.render('dashboard', { businesses, selectedBusiness, host: req.headers.host, userId: req.session.userId });
 });

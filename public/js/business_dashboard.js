@@ -501,20 +501,20 @@ async function loadTrainingData() {
             trainingDataTableBody.innerHTML = data.trainingData
                 .filter(item => item.type === 'qa')
                 .map(item => `
-                    <tr>
+                <tr>
                         <td>${item.question || ''}</td>
                         <td>${item.answer || ''}</td>
-                        <td>${new Date(item.updated_at).toLocaleString()}</td>
-                        <td>
-                            <button class="btn btn-sm btn-outline-primary me-1" onclick="editTrainingData(${item.id})">
-                                <i class="fas fa-edit"></i>
-                            </button>
-                            <button class="btn btn-sm btn-outline-danger" onclick="deleteTrainingData(${item.id})">
-                                <i class="fas fa-trash"></i>
-                            </button>
-                        </td>
-                    </tr>
-                `).join('');
+                    <td>${new Date(item.updated_at).toLocaleString()}</td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-primary me-1" onclick="editTrainingData(${item.id})">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="deleteTrainingData(${item.id})">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
             // Links
             if (linksDataTableBody) {
                 linksDataTableBody.innerHTML = data.trainingData

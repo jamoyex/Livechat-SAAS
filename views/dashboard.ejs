@@ -915,8 +915,13 @@
                             if (data.lastTrained) {
                                 var botLastTrained = document.getElementById('botLastTrained');
                                 if (botLastTrained) {
-                                    botLastTrained.textContent = 'Bot last trained: ' + new Date(data.lastTrained).toLocaleString();
-                                    botLastTrained.dataset.timestamp = data.lastTrained;
+                                    var ts = data.lastTrained;
+                                    if (ts) {
+                                        var date = new Date(ts);
+                                        botLastTrained.textContent = 'Bot last trained: ' + date.toLocaleString();
+                                    } else {
+                                        botLastTrained.textContent = 'Not trained yet';
+                                    }
                                 }
                             }
                         } else {
@@ -938,8 +943,7 @@
             if (botLastTrained) {
                 var ts = botLastTrained.dataset.timestamp;
                 if (ts) {
-                    var utcString = ts.replace(' ', 'T') + 'Z';
-                    var date = new Date(utcString);
+                    var date = new Date(ts);
                     botLastTrained.textContent = 'Bot last trained: ' + date.toLocaleString();
                 } else {
                     botLastTrained.textContent = 'Not trained yet';
