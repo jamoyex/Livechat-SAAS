@@ -437,6 +437,10 @@
             container.appendChild(div);
             chatBody.appendChild(container);
             chatBody.scrollTop = chatBody.scrollHeight;
+            // Play notification sound for bot and agent messages
+            if (sender_type === 'bot' || sender_type === 'agent') {
+                playNotificationSound();
+            }
         }
         function appendTypingIndicator() {
             removeTypingIndicator();
@@ -505,6 +509,11 @@
                 }
             });
         });
+        // Notification sound feature
+        const notificationSound = new Audio('/sounds/notification.mp3');
+        function playNotificationSound() {
+            notificationSound.play().catch(e => console.error('Error playing notification sound:', e));
+        }
     </script>
 </body>
 </html> 
