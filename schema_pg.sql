@@ -82,8 +82,11 @@ CREATE INDEX idx_message_read ON messages(is_read);
 CREATE TABLE IF NOT EXISTS ai_training_data (
     id SERIAL PRIMARY KEY,
     business_id INTEGER NOT NULL,
-    question TEXT NOT NULL,
-    answer TEXT NOT NULL,
+    type VARCHAR(10) CHECK (type IN ('qa', 'link', 'text')),
+    question TEXT,
+    answer TEXT,
+    link TEXT,
+    text TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (business_id) REFERENCES businesses(id)
