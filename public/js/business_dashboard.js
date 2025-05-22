@@ -219,11 +219,11 @@ async function selectConversation(conversationId) {
     // Leave previous conversation room (only if different)
     if (previousConversationId && previousConversationId !== conversationId) {
         socket.emit('leave conversation', { conversationId: previousConversationId });
-        console.log('Left conversation room:', previousConversationId);
+        console.debug('Left conversation room:', previousConversationId);
     }
     // Join new conversation room (use correct event for admin)
     socket.emit('admin join', { businessId: currentBusinessId, conversationId });
-    console.log('Joined conversation room:', conversationId);
+    console.debug('Joined conversation room:', conversationId);
     previousConversationId = conversationId;
     currentConversationId = conversationId;
     // Fetch conversation metadata (status)
@@ -234,7 +234,9 @@ async function selectConversation(conversationId) {
         if (data.conversation && data.conversation.status) {
             status = data.conversation.status;
         }
-    } catch (e) {}
+    } catch (err) {
+        console.error('Failed to load conversation metadata', err);
+    }
     // Manually update highlight (no reload)
     document.querySelectorAll('.chat-preview').forEach(div => {
         if (div.dataset.id == conversationId.toString()) {
@@ -282,7 +284,7 @@ messageForm.onsubmit = async e => {
 
 // Listen for real-time chat messages in the current conversation
 socket.on('chat message', data => {
-    console.log('Received chat message event:', data);
+    console.debug('Received chat message event:', data);
     if (data.conversationId == currentConversationId) {
         renderMessage(data);
         // Play notification sound if it's a user/visitor message and notifications are enabled
@@ -379,10 +381,27 @@ function timeAgo(date) {
 
 async function loadTeamMembers() {
     if (!currentBusinessId) return;
-    // TODO: Implement AJAX call to fetch team members for currentBusinessId
-    // Example: fetch(`/api/business/${currentBusinessId}/team`)
-    // For now, clear the list
-    document.getElementById('teamMembersList').innerHTML = '<div class="alert alert-info">Team management coming soon!</div>';
+    try {
+        const res = await fetch(`/api/business/${currentBusinessId}/team`);
+        const data = await res.json();
+        if (data.team) {
+            const container = document.getElementById('teamMembersList');
+            container.innerHTML = data.team.map(member => `
+                <div class="col-md-4">
+                    <div class="card shadow-sm">
+                        <div class="card-body">
+                            <h5 class="card-title mb-1">${member.name}</h5>
+                            <div class="text-sm text-muted mb-2">${member.email}</div>
+                            <span class="badge bg-secondary">${member.role}</span>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+    } catch (err) {
+        console.error('Failed to load team members', err);
+        document.getElementById('teamMembersList').innerHTML = '<div class="alert alert-danger">Failed to load team members</div>';
+    }
 }
 
 async function loadWidgetSettings() {

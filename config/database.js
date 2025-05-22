@@ -2,12 +2,6 @@ require('dotenv').config();
 
 const { Pool } = require('pg');
 
-// Debug logging
-console.log('Database Configuration:');
-console.log('Host:', process.env.DB_HOST);
-console.log('User:', process.env.DB_USER);
-console.log('Database:', process.env.DB_NAME);
-console.log('Port:', process.env.DB_PORT || 5432);
 
 const pool = new Pool({
   host: process.env.DB_HOST,
@@ -20,3 +14,4 @@ const pool = new Pool({
 });
 
 module.exports = pool; 
+

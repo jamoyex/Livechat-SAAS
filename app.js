@@ -10,6 +10,9 @@ const cookieParser = require('cookie-parser');
 const { v4: uuidv4 } = require('uuid');
 const zlib = require('zlib');
 const rateLimit = require('express-rate-limit');
+if (!global.fetch) {
+    global.fetch = require('node-fetch');
+}
 const pool = require('./config/database');  // Import PostgreSQL pool
 const app = express();
 
@@ -387,10 +390,10 @@ app.get('/register', (req, res) => {
 app.post('/register', authLimiter, async (req, res) => {
     const { email, password, name } = req.body;
     let error;
-    console.log('Register attempt:', { email, name });
+    console.debug('Register attempt:', { email, name });
     if (!email || !password || !name) {
         error = 'All fields are required.';
-        console.log('Registration error: missing fields');
+        console.debug('Registration error: missing fields');
         return res.render('register', { error });
     }
     try {
@@ -401,7 +404,7 @@ app.post('/register', authLimiter, async (req, res) => {
         );
         if (rows.length > 0) {
             error = 'Email already exists.';
-            console.log('Registration error: email exists');
+            console.debug('Registration error: email exists');
             return res.render('register', { error });
         }
         // Hash password
@@ -416,7 +419,7 @@ app.post('/register', authLimiter, async (req, res) => {
         // Auto-login: set session
         req.session.userId = userId;
         req.session.userName = name;
-        console.log('Registration success:', { userId, email });
+        console.debug('Registration success:', { userId, email });
         // Redirect to dashboard
         return res.redirect('/dashboard');
     } catch (err) {
@@ -1246,7 +1249,7 @@ app.post('/api/business/:id/train-bot', requireLogin, async (req, res) => {
         if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
 
         // Log outgoing request
-        console.log('Calling webhook:', webhookUrl, { businessId, userId });
+        console.debug('Calling webhook:', webhookUrl, { businessId, userId });
 
         // Call webhook using built-in fetch
         const webhookRes = await fetch(webhookUrl, {
@@ -1257,8 +1260,8 @@ app.post('/api/business/:id/train-bot', requireLogin, async (req, res) => {
 
         // Log response
         const webhookText = await webhookRes.text();
-        console.log('Webhook response status:', webhookRes.status);
-        console.log('Webhook response body:', webhookText);
+        console.debug('Webhook response status:', webhookRes.status);
+        console.debug('Webhook response body:', webhookText);
 
         if (!webhookRes.ok) {
             return res.status(500).json({ error: 'Webhook call failed', details: webhookText });
