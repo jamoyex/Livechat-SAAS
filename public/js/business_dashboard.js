@@ -33,6 +33,7 @@ const widgetH1Color = document.getElementById('widget_h1_color');
 const widgetButtonColor = document.getElementById('widget_button_color');
 const widgetVisitorMessageColor = document.getElementById('widget_visitor_message_color');
 const widgetPreviewIframe = document.getElementById('widgetPreviewIframe');
+const widgetInitialMessages = document.getElementById('widget_initial_messages');
 
 // AI Settings logic
 const aiSettingsForm = document.getElementById('aiSettingsForm');
@@ -395,6 +396,7 @@ async function loadWidgetSettings() {
         widgetH1Color.value = data.settings.widget_h1_color || '#000000';
         widgetButtonColor.value = data.settings.widget_button_color || '#B31111';
         widgetVisitorMessageColor.value = data.settings.widget_visitor_message_color || '#007bff';
+        widgetInitialMessages.value = data.settings.widget_initial_messages || '';
         updateWidgetPreview();
     }
 }
@@ -409,10 +411,13 @@ function updateWidgetPreview() {
     params.set('h1Color', widgetH1Color.value);
     params.set('buttonColor', widgetButtonColor.value);
     params.set('visitorMessageColor', widgetVisitorMessageColor.value);
+    if (widgetInitialMessages && widgetInitialMessages.value) {
+        params.set('initialMessages', widgetInitialMessages.value);
+    }
     widgetPreviewIframe.src = `/widget/${currentBusinessId}?${params.toString()}`;
 }
 
-[widgetHeaderName, widgetHeaderColor, widgetQuickReplies, widgetH1Color, widgetButtonColor, widgetVisitorMessageColor].forEach(input => {
+[widgetHeaderName, widgetHeaderColor, widgetQuickReplies, widgetH1Color, widgetButtonColor, widgetVisitorMessageColor, widgetInitialMessages].forEach(input => {
     input.addEventListener('input', updateWidgetPreview);
 });
 

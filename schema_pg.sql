@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS businesses (
     widget_h1_color VARCHAR(32),
     widget_button_color VARCHAR(32),
     widget_visitor_message_color VARCHAR(32),
+    widget_initial_messages TEXT[],
     chatbase_api_key VARCHAR(255),
     chatbase_agent_id VARCHAR(255),
     n8n_webhook_url VARCHAR(255),

@@ -285,12 +285,13 @@
                     <% } %>
                 <% }); %>
             <% } else { %>
-                <div class="message-container bot-message-container">
-                    <div class="message bot-message" style="background-color: #fff; color: #222; border-bottom-left-radius: 5px; text-align: left; margin-right: auto;"> Hello! I'm <%= business.name %> AI! 👋</div>
-                </div>
-                <div class="message-container bot-message-container">
-                    <div class="message bot-message" style="background-color: #fff; color: #222; border-bottom-left-radius: 5px; text-align: left; margin-right: auto;">I'm here to help with any question you have! ☺️</div>
-                </div>
+                <% if (business.widget_initial_messages && business.widget_initial_messages.length > 0) { %>
+                    <% business.widget_initial_messages.forEach(function(message) { %>
+                        <div class="message-container bot-message-container">
+                            <div class="message bot-message" style="background-color: #fff; color: #222; border-bottom-left-radius: 5px; text-align: left; margin-right: auto;"><%= message %></div>
+                        </div>
+                    <% }); %>
+                <% } %>
             <% } %>
         </div>
         <% if ((!messages || messages.length === 0) && quickReplies && quickReplies.length > 0) { %>

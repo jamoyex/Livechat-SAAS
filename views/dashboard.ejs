@@ -487,6 +487,11 @@
                                             <label class="form-label" for="widget_quick_replies">Quick Replies (one per line)</label>
                                             <textarea class="form-control" id="widget_quick_replies" name="widget_quick_replies" rows="4"><%= selectedBusiness.widget_quick_replies ? selectedBusiness.widget_quick_replies : '' %></textarea>
                                         </div>
+                                        <div class="mb-3">
+                                            <label class="form-label" for="widget_initial_messages">Initial Messages (one per line)</label>
+                                            <textarea class="form-control" id="widget_initial_messages" name="widget_initial_messages" rows="4" placeholder="Enter initial messages that will appear when a visitor opens the chat"><%= selectedBusiness.widget_initial_messages ? selectedBusiness.widget_initial_messages.join('\n') : '' %></textarea>
+                                            <div class="form-text">These messages will appear when a visitor first opens the chat widget.</div>
+                                        </div>
                                         <button type="submit" class="btn btn-primary">Save Settings</button>
                                     </form>
                                 </div>

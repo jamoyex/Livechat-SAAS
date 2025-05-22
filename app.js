@@ -592,6 +592,7 @@ app.get('/widget/:businessId', widgetLimiter, async (req, res) => {
     let visitorId;
     let widgetHeaderName, widgetHeaderColor, widgetQuickReplies;
     let widgetH1Color, widgetButtonColor, widgetVisitorMessageColor;
+    let previewInitialMessages = null;
     try {
         const { rows: bizRows } = await pool.query(
             'SELECT * FROM businesses WHERE id = $1',
@@ -605,6 +606,11 @@ app.get('/widget/:businessId', widgetLimiter, async (req, res) => {
             // Always use a new visitorId and no messages for preview
             visitorId = uuidv4();
             messages = [];
+            // Handle initialMessages from query param
+            if (typeof req.query.initialMessages === 'string') {
+                previewInitialMessages = req.query.initialMessages.split('\n').map(m => m.trim()).filter(m => m.length > 0);
+                business.widget_initial_messages = previewInitialMessages;
+            }
         } else {
             visitorId = req.cookies.visitorId;
             if (!visitorId) {
@@ -956,13 +962,20 @@ app.get('/api/business/:id/widget-settings', requireLogin, async (req, res) => {
 app.post('/api/business/:id/widget-settings', requireLogin, async (req, res) => {
     const userId = req.session.userId;
     const businessId = req.params.id;
-    const { widget_header_name, widget_header_color, widget_quick_replies, widget_h1_color, widget_button_color, widget_visitor_message_color } = req.body;
+    const { widget_header_name, widget_header_color, widget_quick_replies, widget_h1_color, widget_button_color, widget_visitor_message_color, widget_initial_messages } = req.body;
     try {
         const { error, business } = await checkBusinessAccess(businessId, userId);
         if (error) return res.status(error === 'Business not found' ? 404 : 403).json({ error });
+        // Parse initial messages as array
+        let initialMessagesArr = [];
+        if (typeof widget_initial_messages === 'string') {
+            initialMessagesArr = widget_initial_messages.split('\n').map(m => m.trim()).filter(m => m.length > 0);
+        } else if (Array.isArray(widget_initial_messages)) {
+            initialMessagesArr = widget_initial_messages.map(m => m.trim()).filter(m => m.length > 0);
+        }
         await pool.query(
-            'UPDATE businesses SET widget_header_name = $1, widget_header_color = $2, widget_quick_replies = $3, widget_h1_color = $4, widget_button_color = $5, widget_visitor_message_color = $6 WHERE id = $7',
-            [widget_header_name, widget_header_color, widget_quick_replies, widget_h1_color, widget_button_color, widget_visitor_message_color, businessId]
+            'UPDATE businesses SET widget_header_name = $1, widget_header_color = $2, widget_quick_replies = $3, widget_h1_color = $4, widget_button_color = $5, widget_visitor_message_color = $6, widget_initial_messages = $7 WHERE id = $8',
+            [widget_header_name, widget_header_color, widget_quick_replies, widget_h1_color, widget_button_color, widget_visitor_message_color, initialMessagesArr, businessId]
         );
         res.json({ success: true });
     } catch (err) {
