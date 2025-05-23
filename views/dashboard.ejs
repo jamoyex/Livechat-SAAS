@@ -5,13 +5,37 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Botbuilders Chat Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        text: '#000000',
+                        background: '#FFFFFF',
+                        accent: '#C7FF00',
+                        card: '#F5F7F9',
+                        muted: '#6B7280'
+                    },
+                    borderRadius: {
+                        lg: '24px'
+                    },
+                    transitionDuration: {
+                        fast: '200ms'
+                    }
+                }
+            }
+        }
+    </script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="/css/style.css" rel="stylesheet">
     <style>
         html, body { height: 100%; min-height: 100vh; }
-        body { min-height: 100vh; background: linear-gradient(135deg, #f6f8fa 0%, #e0e7ff 100%); height: 100vh; overflow: hidden; }
+        body { min-height: 100vh; background: var(--background-color); height: 100vh; overflow: hidden; }
         .dashboard-header {
             box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-            background: linear-gradient(90deg, #2563eb 0%, #22c55e 100%);
+            background: var(--card-color);
             border-bottom: none;
         }
         .dashboard-header .logo-img {
@@ -32,7 +56,7 @@
         }
         .sidebar-nav { margin-top: 2rem; }
         .sidebar-nav .nav-link {
-            color: #2563eb;
+            color: var(--accent-color);
             border-radius: 10px;
             font-weight: 500;
             margin-bottom: 8px;
@@ -45,8 +69,8 @@
         }
         .sidebar-nav .nav-link i { font-size: 1.2rem; }
         .sidebar-nav .nav-link.active {
-            background: linear-gradient(90deg, #2563eb 0%, #22c55e 100%);
-            color: #fff;
+            background: var(--accent-color);
+            color: var(--text-color);
             font-weight: 700;
             box-shadow: 0 2px 8px rgba(59,130,246,0.08);
         }
@@ -141,8 +165,8 @@
         }
         .message.bot {
             align-self: flex-end;
-            background: #2563eb;
-            color: #fff;
+            background: var(--accent-color);
+            color: var(--text-color);
             border-bottom-right-radius: 6px;
             margin-left: auto;
         }
@@ -157,15 +181,15 @@
             width: 36px;
             height: 36px;
             border-radius: 50%;
-            background: #e0e7ff;
+            background: var(--card-color);
             display: flex;
             align-items: center;
             justify-content: center;
             font-size: 1.3rem;
             font-weight: 700;
-            color: #2563eb;
+            color: var(--accent-color);
         }
-        .message.bot .message-avatar { background: #2563eb; color: #fff; }
+        .message.bot .message-avatar { background: var(--accent-color); color: var(--text-color); }
         .message.agent .message-avatar { background: #22c55e; color: #fff; }
         .message.user .message-avatar { background: #f0f0f0; color: #2563eb; }
         .chat-input-area {
@@ -191,12 +215,12 @@
         }
         #messageInput:focus {
             outline: none;
-            border-color: #2563eb;
-            box-shadow: 0 0 0 0.2rem #2563eb33;
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 0.2rem var(--accent-color);
         }
         .send-btn {
-            color: #fff;
-            background: #2563eb;
+            color: var(--text-color);
+            background: var(--accent-color);
             border: none;
             border-radius: 50%;
             width: 48px;
@@ -205,10 +229,11 @@
             align-items: center;
             justify-content: center;
             font-size: 1.3rem;
-            transition: background 0.18s;
+            transition: opacity var(--transition-fast), transform var(--transition-fast);
         }
         .send-btn:hover {
-            background: #2563eb;
+            opacity: 0.85;
+            transform: scale(0.98);
         }
         .status-badge {
             padding: 2px 10px;
@@ -256,28 +281,29 @@
             transition: border 0.18s, box-shadow 0.18s;
         }
         .form-control:focus, .form-select:focus {
-            border-color: #2563eb;
-            box-shadow: 0 0 0 2px #2563eb22;
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 2px var(--accent-color);
         }
         .btn-primary {
-            background: #2563eb;
-            border-color: #2563eb;
+            background: var(--accent-color);
+            border-color: var(--accent-color);
+            color: var(--text-color);
             font-weight: 600;
-            border-radius: 8px;
-            transition: background 0.18s, border 0.18s;
+            border-radius: var(--radius-lg);
+            transition: opacity var(--transition-fast), transform var(--transition-fast);
         }
         .btn-primary:hover {
-            background: #1d4ed8;
-            border-color: #1d4ed8;
+            opacity: 0.85;
+            transform: scale(0.98);
         }
         .btn-outline-primary {
-            color: #2563eb;
-            border-color: #2563eb;
-            border-radius: 8px;
+            color: var(--accent-color);
+            border-color: var(--accent-color);
+            border-radius: var(--radius-lg);
         }
         .btn-outline-primary:hover {
-            background: #2563eb;
-            color: #fff;
+            background: var(--accent-color);
+            color: var(--text-color);
         }
         .btn-outline-danger {
             border-radius: 8px;
@@ -341,7 +367,7 @@
 </head>
 <body>
     <!-- Dashboard Header -->
-    <header class="dashboard-header d-flex align-items-center px-4 py-3 border-bottom justify-content-between" style="height: 72px;">
+    <header class="dashboard-header flex items-center justify-between px-4 py-3 border-b shadow-sm" style="height: 72px;">
         <img src="/images/BotBuilders_Logo_White_2.png" alt="Logo" class="logo-img">
         <div class="form-check form-switch ms-2">
             <input class="form-check-input" type="checkbox" id="notificationToggle">
@@ -362,49 +388,49 @@
                 </div>
             </div>
             <nav class="sidebar-nav nav flex-column nav-pills p-2 gap-2">
-                <a class="nav-link active" id="tab-chats" href="#" data-tab="chats"><i class="fas fa-comments me-2"></i>Chats</a>
-                <a class="nav-link" id="tab-team" href="#" data-tab="team"><i class="fas fa-users me-2"></i>Team Members</a>
-                <a class="nav-link" id="tab-widget" href="#" data-tab="widget"><i class="fas fa-cog me-2"></i>Widget Settings</a>
-                <a class="nav-link" id="tab-ai" href="#" data-tab="ai"><i class="fas fa-robot me-2"></i>AI Settings</a>
-                <a class="nav-link" id="tab-training" href="#" data-tab="training"><i class="fas fa-graduation-cap me-2"></i>AI Training Info</a>
-                <a class="nav-link" id="tab-install" href="#" data-tab="install"><i class="fas fa-code me-2"></i>Install Widget</a>
-                <a class="nav-link mt-auto text-danger" href="/logout"><i class="fas fa-sign-out-alt me-2"></i>Logout</a>
+                <a class="nav-link active flex items-center gap-2 px-3 py-2 rounded-lg transition duration-fast" id="tab-chats" href="#" data-tab="chats"><i class="fas fa-comments"></i><span>Chats</span></a>
+                <a class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg transition duration-fast" id="tab-team" href="#" data-tab="team"><i class="fas fa-users"></i><span>Team Members</span></a>
+                <a class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg transition duration-fast" id="tab-widget" href="#" data-tab="widget"><i class="fas fa-cog"></i><span>Widget Settings</span></a>
+                <a class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg transition duration-fast" id="tab-ai" href="#" data-tab="ai"><i class="fas fa-robot"></i><span>AI Settings</span></a>
+                <a class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg transition duration-fast" id="tab-training" href="#" data-tab="training"><i class="fas fa-graduation-cap"></i><span>AI Training Info</span></a>
+                <a class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg transition duration-fast" id="tab-install" href="#" data-tab="install"><i class="fas fa-code"></i><span>Install Widget</span></a>
+                <a class="nav-link mt-auto text-danger flex items-center gap-2 px-3 py-2 rounded-lg transition duration-fast" href="/logout"><i class="fas fa-sign-out-alt"></i><span>Logout</span></a>
             </nav>
         </div>
         <!-- Main Content Area -->
         <div class="main-content col-12 col-md-9 p-0">
             <!-- Chats Section -->
             <section id="section-chats" class="tab-section active">
-                <div class="chat-area">
-                    <div class="chat-header d-flex justify-content-between align-items-center">
+                <div class="chat-area flex flex-col h-full">
+                    <div class="chat-header flex justify-between items-center px-4 py-3 border-b bg-card">
                         <div>
                             <h6 id="conversationTitle" class="mb-0">Select a conversation</h6>
                         </div>
                         <div class="d-flex gap-2">
-                            <button id="takeOverBtn" class="btn btn-sm btn-outline-primary d-none">Take Over</button>
-                            <button id="letBotHandleBtn" class="btn btn-sm btn-outline-success d-none">Let AI Respond</button>
-                            <button id="deleteConversationBtn" class="btn btn-sm btn-outline-danger" title="Delete this conversation and all its messages"><i class="fas fa-trash"></i></button>
+                            <button id="takeOverBtn" class="btn btn-sm btn-outline-primary d-none transition duration-fast">Take Over</button>
+                            <button id="letBotHandleBtn" class="btn btn-sm btn-outline-success d-none transition duration-fast">Let AI Respond</button>
+                            <button id="deleteConversationBtn" class="btn btn-sm btn-outline-danger transition duration-fast" title="Delete this conversation and all its messages"><i class="fas fa-trash"></i></button>
                         </div>
                     </div>
                     <div class="chat-row">
                         <div class="conversations-col">
                             <div class="conversations-header p-3 border-bottom bg-white">
-                                <div class="input-group">
-                                    <input type="text" id="searchInput" class="form-control" placeholder="Search conversations...">
-                                    <button class="btn btn-outline-secondary" id="refreshBtn"><i class="fas fa-sync-alt"></i></button>
+                                <div class="flex gap-2">
+                                    <input type="text" id="searchInput" class="form-control flex-grow" placeholder="Search conversations...">
+                                    <button class="btn btn-outline-secondary transition duration-fast" id="refreshBtn"><i class="fas fa-sync-alt"></i></button>
                                 </div>
                             </div>
                             <div id="conversationsList" class="custom-scrollbar"></div>
                             <div class="load-more-container p-3 text-center">
-                                <button id="loadMoreBtn" class="btn btn-outline-secondary w-100">Load More</button>
+                                <button id="loadMoreBtn" class="btn btn-outline-secondary w-100 transition duration-fast">Load More</button>
                             </div>
                         </div>
                         <div class="chat-messages-col flex-grow-1">
                             <div id="chatMessages" class="chat-messages"></div>
                             <div class="chat-input-area">
                                 <div id="activeNotice" class="alert alert-info d-none mb-2">This conversation is being handled by the AI assistant. Take over to respond.</div>
-                                <form id="messageForm">
-                                    <input type="text" class="form-control" id="messageInput" placeholder="Type your message..." autocomplete="off">
+                                <form id="messageForm" class="flex items-center gap-2">
+                                    <input type="text" class="form-control flex-grow" id="messageInput" placeholder="Type your message..." autocomplete="off">
                                     <button type="submit" class="send-btn" title="Send"><i class="fas fa-paper-plane"></i></button>
                                 </form>
                             </div>
@@ -432,12 +458,12 @@
                                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                             </div>
                             <div class="modal-body">
-                                <form id="addMemberForm">
-                                    <div class="mb-3">
+                                <form id="addMemberForm" class="space-y-4">
+                                    <div>
                                         <label for="memberEmail" class="form-label">Member Email</label>
                                         <input type="email" class="form-control" id="memberEmail" required>
                                     </div>
-                                    <div class="mb-3">
+                                    <div>
                                         <label for="memberRole" class="form-label">Role</label>
                                         <select class="form-select" id="memberRole" required>
                                             <option value="admin">Admin</option>
@@ -462,7 +488,7 @@
                             <div class="card shadow-sm">
                                 <div class="card-body">
                                     <h4 class="mb-3">Widget Settings</h4>
-                                    <form id="widgetSettingsForm">
+                                    <form id="widgetSettingsForm" class="space-y-4">
                                         <div class="mb-3">
                                             <label class="form-label" for="widget_header_name">Header Name</label>
                                             <input type="text" class="form-control" id="widget_header_name" name="widget_header_name" value="<%= selectedBusiness.widget_header_name || selectedBusiness.name + ' Live Chat' %>" required>
@@ -518,7 +544,7 @@
                             <div class="card">
                                 <div class="card-body">
                                     <h4 class="card-title mb-4">AI Agent Settings</h4>
-                                    <form id="aiSettingsForm">
+                                    <form id="aiSettingsForm" class="space-y-4">
                                         <div class="mb-3" style="display: none;">
                                             <label class="form-label" for="chatbase_api_key">Chatbase API Key</label>
                                             <input type="password" class="form-control" id="chatbase_api_key" name="chatbase_api_key" value="<%= selectedBusiness.chatbase_api_key || '' %>" placeholder="Enter your Chatbase API key">
@@ -667,7 +693,7 @@
                                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                             </div>
                             <div class="modal-body">
-                                <form id="addTrainingForm">
+                                <form id="addTrainingForm" class="space-y-4">
                                     <div class="mb-3">
                                         <label for="trainingQuestion" class="form-label">Question</label>
                                         <textarea class="form-control" id="trainingQuestion" rows="3" required></textarea>
@@ -694,7 +720,7 @@
                                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                             </div>
                             <div class="modal-body">
-                                <form id="addLinkForm">
+                                <form id="addLinkForm" class="space-y-4">
                                     <div class="mb-3">
                                         <label for="linkInput" class="form-label">Link</label>
                                         <input type="url" class="form-control" id="linkInput" required placeholder="https://example.com">
@@ -717,7 +743,7 @@
                                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                             </div>
                             <div class="modal-body">
-                                <form id="addTextForm">
+                                <form id="addTextForm" class="space-y-4">
                                     <div class="mb-3">
                                         <label for="textInput" class="form-label">Text</label>
                                         <textarea class="form-control" id="textInput" rows="5" required></textarea>
