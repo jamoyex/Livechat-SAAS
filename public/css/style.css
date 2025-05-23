@@ -1,54 +1,77 @@
 /* Custom styles for the chat app */
+
+:root {
+  --text-color: #000000;
+  --background-color: #FFFFFF;
+  --accent-color: #C7FF00;
+  --card-color: #F5F7F9;
+  --muted-color: #6B7280;
+  --radius-lg: 24px;
+  --transition-fast: 200ms;
+}
+
+body {
+  background: var(--background-color);
+  color: var(--text-color);
+  font-family: 'Inter', system-ui, sans-serif;
+}
 .navbar {
-    box-shadow: 0 2px 4px rgba(0,0,0,.1);
+  background: var(--background-color);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
 .display-4 {
-    font-weight: 600;
-    color: #2c3e50;
+  font-weight: 700;
+  color: var(--text-color);
 }
 
 .lead {
-    color: #7f8c8d;
+  color: var(--muted-color);
 }
 
 .card {
-    border: none;
-    box-shadow: 0 2px 4px rgba(0,0,0,.05);
-    transition: transform 0.2s;
+  border: none;
+  background: var(--card-color);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  transition: transform var(--transition-fast), opacity var(--transition-fast);
 }
 
 .card:hover {
-    transform: translateY(-5px);
+  transform: translateY(-5px);
 }
 
 .card-title {
-    color: #2c3e50;
-    font-weight: 600;
+  color: var(--text-color);
+  font-weight: 700;
 }
 
 .btn-primary {
-    background-color: #3498db;
-    border-color: #3498db;
+  background-color: var(--accent-color);
+  border-color: var(--accent-color);
+  color: var(--text-color);
+  border-radius: var(--radius-lg);
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
 }
 
 .btn-primary:hover {
-    background-color: #2980b9;
-    border-color: #2980b9;
+  opacity: 0.85;
+  transform: scale(0.98);
 }
 
 .btn-outline-primary {
-    color: #3498db;
-    border-color: #3498db;
+  color: var(--accent-color);
+  border-color: var(--accent-color);
+  border-radius: var(--radius-lg);
 }
 
 .btn-outline-primary:hover {
-    background-color: #3498db;
-    border-color: #3498db;
+  background-color: var(--accent-color);
+  color: var(--text-color);
 }
 
 footer {
-    margin-top: 100px;
+  margin-top: 100px;
 }
 
 /* Responsive adjustments */
@@ -63,9 +86,9 @@ footer {
 }
 
 #conversationsList .chat-preview.active {
-  background: #e6f0ff !important;
-  border-left: 4px solid #007bff !important;
-  box-shadow: 0 2px 8px rgba(0,123,255,0.08);
+  background: var(--card-color) !important;
+  border-left: 4px solid var(--accent-color) !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
 }
 
 #conversationsList .chat-preview.active.unread-preview {
@@ -73,12 +96,12 @@ footer {
 }
 
 .chat-preview.unread-preview {
-  background: #f0f6ff;
+  background: var(--card-color);
 }
 
 .unread-message {
   font-weight: bold;
-  color: #222;
+  color: var(--text-color);
 }
 
 /* Add Business Form Styles */
@@ -87,11 +110,11 @@ footer {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f7fafd;
+  background: var(--card-color);
 }
 .add-business-card {
-  background: #fff;
-  border-radius: 12px;
+  background: var(--background-color);
+  border-radius: var(--radius-lg);
   box-shadow: 0 4px 24px rgba(0,0,0,0.08);
   padding: 2.5rem 2rem 2rem 2rem;
   max-width: 400px;
@@ -100,7 +123,7 @@ footer {
 .add-business-card h2 {
   font-size: 2rem;
   font-weight: 700;
-  color: #2c3e50;
+  color: var(--text-color);
   margin-bottom: 1.5rem;
   text-align: center;
 }
@@ -110,39 +133,41 @@ footer {
 }
 .add-business-card label {
   font-weight: 500;
-  color: #34495e;
+  color: var(--text-color);
   margin-bottom: 0.5rem;
 }
 .add-business-card input[type="text"] {
-  border-radius: 6px;
-  border: 1px solid #dbeafe;
-  padding: 1rem 1rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--muted-color);
+  padding: 1rem;
   font-size: 1.1rem;
   margin-bottom: 1.5rem;
   width: 100%;
-  transition: border 0.2s;
+  transition: border var(--transition-fast), box-shadow var(--transition-fast);
   box-sizing: border-box;
 }
 .add-business-card input[type="text"]:focus {
-  border-color: #3498db;
+  border-color: var(--accent-color);
   outline: none;
+  box-shadow: 0 0 0 2px var(--accent-color);
 }
 .add-business-card button {
-  background: #3498db;
-  color: #fff;
+  background: var(--accent-color);
+  color: var(--text-color);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-lg);
   padding: 0.9rem 1rem;
   font-size: 1.1rem;
   font-weight: 600;
   width: 100%;
-  transition: background 0.2s;
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
   margin-top: 0.5rem;
   letter-spacing: 0.5px;
   text-align: center;
 }
 .add-business-card button:hover {
-  background: #217dbb;
+  opacity: 0.85;
+  transform: scale(0.98);
 }
 
 body, input, button, select, textarea, h1, h2, h3, h4, h5, h6 {
