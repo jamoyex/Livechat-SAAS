@@ -5,11 +5,11 @@
 
 .display-4 {
     font-weight: 600;
-    color: #2c3e50;
+    color: #C6FF00;
 }
 
 .lead {
-    color: #7f8c8d;
+    color: #C6FF00;
 }
 
 .card {
@@ -23,28 +23,31 @@
 }
 
 .card-title {
-    color: #2c3e50;
-    font-weight: 600;
+    color: #222;
+    font-weight: 700;
 }
 
 .btn-primary {
-    background-color: #3498db;
-    border-color: #3498db;
+    background-color: #C6FF00;
+    border-color: #C6FF00;
+    color: #222;
 }
 
 .btn-primary:hover {
-    background-color: #2980b9;
-    border-color: #2980b9;
+    background-color: #b0e600;
+    border-color: #b0e600;
+    color: #222;
 }
 
 .btn-outline-primary {
-    color: #3498db;
-    border-color: #3498db;
+    color: #C6FF00;
+    border-color: #C6FF00;
 }
 
 .btn-outline-primary:hover {
-    background-color: #3498db;
-    border-color: #3498db;
+    background-color: #C6FF00;
+    border-color: #C6FF00;
+    color: #222;
 }
 
 footer {
@@ -63,17 +66,17 @@ footer {
 }
 
 #conversationsList .chat-preview.active {
-  background: #e6f0ff !important;
-  border-left: 4px solid #007bff !important;
-  box-shadow: 0 2px 8px rgba(0,123,255,0.08);
+  background: #eaffb0 !important;
+  border-left: 4px solid #C6FF00 !important;
+  box-shadow: 0 2px 8px rgba(198,255,0,0.08);
 }
 
 #conversationsList .chat-preview.active.unread-preview {
-  background: #e6f0ff !important;
+  background: #eaffb0 !important;
 }
 
 .chat-preview.unread-preview {
-  background: #f0f6ff;
+  background: #f7ffe6;
 }
 
 .unread-message {
@@ -100,7 +103,7 @@ footer {
 .add-business-card h2 {
   font-size: 2rem;
   font-weight: 700;
-  color: #2c3e50;
+  color: #C6FF00;
   margin-bottom: 1.5rem;
   text-align: center;
 }
@@ -110,7 +113,7 @@ footer {
 }
 .add-business-card label {
   font-weight: 500;
-  color: #34495e;
+  color: #222;
   margin-bottom: 0.5rem;
 }
 .add-business-card input[type="text"] {
@@ -124,12 +127,12 @@ footer {
   box-sizing: border-box;
 }
 .add-business-card input[type="text"]:focus {
-  border-color: #3498db;
+  border-color: #C6FF00;
   outline: none;
 }
 .add-business-card button {
-  background: #3498db;
-  color: #fff;
+  background: #C6FF00;
+  color: #222;
   border: none;
   border-radius: 6px;
   padding: 0.9rem 1rem;
@@ -142,7 +145,7 @@ footer {
   text-align: center;
 }
 .add-business-card button:hover {
-  background: #217dbb;
+  background: #b0e600;
 }
 
 body, input, button, select, textarea, h1, h2, h3, h4, h5, h6 {
